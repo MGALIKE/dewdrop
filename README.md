@@ -1,161 +1,189 @@
 <div align="center">
 
-<img src="NotchBuddy/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width="96" alt="Coucou icon">
+# Dewdrop
 
-# Coucou
+**A drop of Liquid Glass in your Mac's notch that keeps an eye on your Claude Code sessions — and costs about 1 % of a core while it does.**
 
-**A tiny friend that lives in your Mac's notch — or at the top of your screen on Windows — and keeps an eye on your Claude Code sessions.**
-
-Approve permissions, watch your agents work, drop a file, chat with Claude — all without leaving what you're doing.
+Approve permissions, watch your agents work, jump to the right terminal, drop a file, ask Claude a question, control your music, set a timer — without leaving what you're doing.
 
 ![macOS 15+](https://img.shields.io/badge/macOS-15%2B-black?logo=apple)
-![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows&logoColor=white)
+![Liquid Glass on macOS 26](https://img.shields.io/badge/Liquid%20Glass-macOS%2026-5AC8FA)
 ![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-native-0A84FF)
-![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?logo=tauri&logoColor=black)
+![SwiftUI + AppKit](https://img.shields.io/badge/SwiftUI%20%2B%20AppKit-native-0A84FF)
+![Zero dependencies](https://img.shields.io/badge/dependencies-0-success)
+![Idle CPU ~1%](https://img.shields.io/badge/idle%20CPU-~1%25-34D399)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![GitHub stars](https://img.shields.io/github/stars/Louis-CFM/coucou?style=social)
 
-<img src="docs/media/demo.gif" width="760" alt="Coucou in action">
+<img src="docs/media/greeting.gif" width="800" alt="Dew saying hello at launch">
 
 </div>
 
 ---
 
-## Why
+## Meet Dew
 
-Some studios showed off gorgeous notch companions… and never let anyone use them.
-**Coucou is the open version.** Every line of code, every animation, every sound — free to use, read, fork and remix.
+Dew is a bead of the island's own glass. In the open island its body is **real Liquid Glass** (`glassEffect`, not a blurred rectangle): it bends whatever is behind it, and inside it holds a little liquid that takes the colour of what Claude is doing — clear when idle, blue while working, amber when something needs you, green when it's done. Move the island and the liquid sloshes; leave it alone and it settles.
 
-Meet **Mochi**: a soft little squircle with big eyes that pops out of your notch, waves hello, follows your cursor with its eyes, gets annoyed when you poke it (and dizzy if you insist), and tells you the moment Claude Code needs you.
+<div align="center">
+<img src="docs/media/states-strip.png" width="900" alt="Dew: idle, working, thinking, approval, finished, error, sleeping">
+<br><sub>idle · working · thinking · needs approval · finished · error · sleeping (at night Dew wears a nightcap)</sub>
+</div>
 
-## Features
+Dew blinks, breathes, follows your pointer with its eyes, waves hello when the app starts, puts on headphones when music plays, a scarf when it snows, sunglasses when it's bright, and turns into a glass box to swallow a file you drop on the notch.
 
-- 🤖 **Claude Code, Gemini CLI, Antigravity and other agents, live** — see every session in your notch: what it reads, edits and runs, step by step. Tag a hook payload with `coucou_agent` to give any agent its own pill (see [`docs/AGENTS.md`](docs/AGENTS.md)). Finished? Mochi does a happy little jump.
-- ✅ **Approve from the notch** — Claude Code permission requests show up with **Allow / Deny**. One click, back to work.
-- 🧑‍💻 **Jump to the right terminal** — open the exact terminal window of a session *(macOS)*.
-- 💬 **Ask Claude anything** — built-in chat, straight from the notch. Pick the model in Settings; the list comes from your Anthropic account.
-- 📎 **Drop a file on the notch** — Mochi turns into a box and swallows it, then ask a question about it or send it by email *(email: macOS, Mail.app)*.
-- 🪟 **Drag Mochi onto any window** — attach that window as context for Claude *(macOS)*.
-- 🔌 **Integrations** — Stripe payments, n8n workflows, GitHub, Vercel deployments, Resend emails, Notion, Cal.com. Each one gets its own little colored Mochi.
-- 🎭 **A real character** — idle breathing, blinks, eyes on a sphere that follow your mouse, emotes, 28 handcrafted sounds, a greeting on launch.
-- 🫥 **Invisible when idle** — hides away when nothing is running, peeks out when you hover the notch (the top edge of the screen on Windows).
-- 🖥️ **Any Mac, notch or not** — on an iMac, a Mac mini, or a MacBook with its lid closed on an external display, Mochi sits in a small bar at the top of the screen.
-- 🔒 **Private by design** — no telemetry, no account. Keys live in your macOS Keychain or Windows Credential Manager. The app only talks to the services you plug in.
+<div align="center">
+<img src="docs/media/hero.png" width="800" alt="The open island over a dark wallpaper">
+<img src="docs/media/hero-light.png" width="800" alt="The same island over a white page">
+<br><sub>The island is glass too: the same view over a dark wallpaper and over a white page.</sub>
+</div>
+
+## What it does
+
+- 🤖 **Every Claude Code session, live** — in any terminal (Terminal, iTerm, Ghostty, Warp, VS Code, Cursor…), not only VS Code. See what each session reads, edits and runs; the dot breathes while it's busy.
+- ✅ **Approve from the notch** — permission requests arrive with **Allow / Deny**. One click, back to work. The island never answers on its own.
+- 🧑‍💻 **Jump to the right terminal** — click a session and the exact window and tab comes to the front; a finished session can be resumed in a new one.
+- 💬 **Ask Claude anything** — chat straight from the notch through the Claude Code CLI, so it uses your subscription; no API key needed (an API key works too).
+- 📊 **Claude hub** — your 5-hour and weekly usage, recent sessions and shortcuts to the Claude apps, in the session card.
+- 🎵 ⏱️ 💻 📎 📋 📝 **Live-activity pills** — Music (with artwork and a scrubber), Timer, System (CPU, memory, battery, thermal), Shelf (files you dropped), Clipboard history and Notes, each with its own small coloured Dew. Track changes and timers show as compact Dynamic-Island banners when the island is folded.
+- 📎 **Drop a file on the notch** — Dew becomes a glass box and swallows it; then ask a question about it, send it by email or keep it on the shelf.
+- 🪟 **Drag Dew onto a window** — attach that window as context for your question.
+- 🌦️ **Weather** — in the header, with the next hours in a card. Dew opens an umbrella when it rains.
+- ☕ **Keep awake** — stop the Mac from sleeping from the island.
+- 🔌 **Integrations** — Stripe, n8n, GitHub, Vercel, Resend, Notion, Cal.com, each as a pill ([docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)); any agent can get its own pill by tagging its hook payload ([docs/AGENTS.md](docs/AGENTS.md)).
+- 🫥 **Out of the way** — folded into the notch when there's nothing to say; opens on hover or click, closes when you click elsewhere or press Escape.
+- 🖥️ **Any Mac** — on a Mac without a notch (or with the lid closed) the island sits in a small bar at the top of the screen.
+- 🔒 **Private by design** — no telemetry, no account. Keys live in the macOS Keychain. The app talks only to the services you plug in.
 
 <table>
 <tr>
-<td><img src="docs/media/claude-code.png" alt="Claude Code session"></td>
-<td><img src="docs/media/stripe.png" alt="Stripe payments"></td>
+<td><img src="docs/media/card-music.png" alt="Music card"></td>
+<td><img src="docs/media/card-timer.png" alt="Timer card"></td>
 </tr>
 <tr>
-<td><img src="docs/media/chat.png" alt="Chat with Claude"></td>
-<td><img src="docs/media/dizzy.png" alt="Too many hits"></td>
+<td><img src="docs/media/card-system.png" alt="System card"></td>
+<td><img src="docs/media/card-shelf.png" alt="Shelf card"></td>
+</tr>
+<tr>
+<td><img src="docs/media/card-clipboard.png" alt="Clipboard card"></td>
+<td><img src="docs/media/card-notes.png" alt="Notes card"></td>
+</tr>
+<tr>
+<td><img src="docs/media/upload.png" alt="Drop zone"></td>
+<td><img src="docs/media/settings.png" alt="Quick settings"></td>
 </tr>
 </table>
 
+<div align="center">
+<img src="docs/media/open-close.gif" width="800" alt="The island opening and closing"><br>
+<img src="docs/media/file-drop.gif" width="760" alt="Dropping a file on the notch">
+</div>
+
+## Efficient by design
+
+A notch companion is on screen all day, so it has to be nearly free. Dewdrop is built around one number: **how many times a second the island is redrawn**. Every redraw of a SwiftUI window costs a few milliseconds whatever changed, so the design keeps that number at zero whenever nothing moves.
+
+<div align="center">
+<img src="docs/media/energy.svg" width="760" alt="CPU before and after the energy work">
+</div>
+
+| Situation | CPU (one core) | What is running |
+|---|---|---|
+| Folded, nobody touching the Mac | **~1 %** | a blink now and then; one pointer check a second |
+| Open, idle, pointer away | **1–2 %** | Dew breathing; 10 pointer checks a second |
+| Open while Claude works | **3–4 %** | the badge's three dots at 6 fps |
+| Pointer on the island, moving | **10–13 %** | everything alive at 30 fps |
+| Pointer parked on the island | **~3 %** after 5 s | the animations settle until it moves |
+
+How it gets there — the long version with the measurements is in [docs/ENERGY.md](docs/ENERGY.md):
+
+- **Only the visible view exists.** The island's sixteen views are not kept alive at opacity 0; the one you see is the only one in the tree.
+- **Nothing ticks for nothing.** Dew's canvas is event-driven: it draws while something changes and stops the moment it settles. A slow heartbeat asks whether a blink is due.
+- **No `TimelineView` for ambient motion.** While a SwiftUI timeline has an entry coming, the window keeps a display link running and renders on every screen refresh between entries — a badge ticking 6 times a second cost 226 render passes a second. Every repeating animation here uses one shared timer (`Beat`) on one clock grid, so all of them land in the same redraw and nothing happens in between.
+- **Two tiers of motion.** Breathing, dancing, the pill characters, the colour drift and text shimmer run only while the pointer is on the island (and settle after five seconds if it's parked there). Things that must move all day — the music equalizer, pulsing dots — are Core Animation layers, which cost the app nothing.
+- **A pointer that doesn't move isn't polled.** Hover detection polls at 20–60 Hz only while the mouse is moving; when it stops, a mouse-moved monitor takes over and the app goes quiet. Global click and key monitors exist only while the island is open.
+- **Measured, not assumed.** `-debugFrames 1` logs every five seconds how many render passes the window made and why (`pass=`, `poll=`, `heartbeat=`, which part of Dew was animating). Each change above was judged by that line and by `top`.
+
 ## Install
 
-### Download for macOS
+There is no release yet (see [Status](#status)). Build from source:
 
-1. Grab the latest `Coucou.zip` from [Releases](https://github.com/Louis-CFM/coucou/releases).
-2. Unzip and move **Coucou.app** to `/Applications`.
-3. Launch. This build isn't notarized by Apple yet, so the first time macOS says it can't verify the developer: open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** (only once).
-
-### Windows
-
-The Windows installer is **temporarily unavailable**. Microsoft Defender wrongly
-flags the unsigned installer as malware; a false-positive report is under review
-at Microsoft and the installer will come back once it is cleared and signed.
-Until then you can [build it from source](#build-from-source).
-
-There is no notch on a PC, so the island slides out of the top edge of the screen
-instead of hiding inside one. See [`windows/README.md`](windows/README.md) for the
-rest of the differences.
-
-### Build from source
-
-**macOS** — requirements: macOS 15+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+**Requirements:** macOS 15+ (Liquid Glass needs macOS 26; on 15 Dew is drawn in plain canvas), Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
 brew install xcodegen
-git clone https://github.com/Louis-CFM/coucou.git
-cd coucou/NotchBuddy
+git clone git@github.com:MGALIKE/coucou-fork.git dewdrop
+cd dewdrop/NotchBuddy
 xcodegen
-open NotchBuddy.xcodeproj   # then ⌘R
-```
-
-**Windows** — requirements: [Rust](https://rustup.rs), Node 20+, MSVC build tools.
-
-```powershell
-git clone https://github.com/Louis-CFM/coucou.git
-cd coucou/windows
-npm install
-npm run pack                # installer lands in windows/release/
+xcodebuild -scheme NotchBuddy -configuration Release -derivedDataPath build build
+cp -R build/Build/Products/Release/Coucou.app /Applications/
+open /Applications/Coucou.app
 ```
 
 ## Setup
 
-Click the Coucou icon in the menu bar (macOS) or in the system tray (Windows) → **Settings…**
+Click the icon in the menu bar → **Settings…**
 
-| What | Why | Where the key goes |
+| What | Why | Where it goes |
 |---|---|---|
-| **Claude Code hooks** | live sessions and approvals | **Install hooks** — Coucou backs up `~/.claude/settings.json`, merges its hooks and shows you the diff before writing anything |
-| **Gemini CLI hooks** *(macOS)* | Gemini CLI sessions in the island | **Install hooks** in Settings → Gemini CLI — backs up `~/.gemini/settings.json` |
-| **Antigravity (agy) hooks** *(macOS)* | agy sessions in the island | **Install hooks** in Settings → Antigravity — backs up `~/.gemini/config/hooks.json` |
-| **Anthropic API key** | chat and questions about files | Keychain / Windows Credential Manager |
-| Stripe, n8n, GitHub, Vercel, Resend, Notion, Cal.com | the integration pills | Keychain / Windows Credential Manager, all optional |
+| **Claude Code hooks** | live sessions and approvals | **Install hooks** — the app backs up `~/.claude/settings.json`, merges its hooks and shows you the diff before writing anything |
+| **Claude Code CLI** | chat on your subscription | found automatically (`claude` on your PATH) |
+| **Anthropic API key** | chat without the CLI, questions about files | Keychain, optional |
+| **Gemini CLI / Antigravity hooks** | their sessions in the island | **Install hooks** in Settings |
+| Stripe, n8n, GitHub, Vercel, Resend, Notion, Cal.com | integration pills | Keychain, all optional |
 
-If Coucou isn't running, the hook exits immediately: **Claude Code is never blocked.**
+If the app isn't running, the hook exits immediately: **Claude Code is never blocked.**
 
 ## Things to try
 
-| Do this | Mochi does that |
+| Do this | Dew does that |
 |---|---|
-| Hover the notch (top edge on Windows) | peeks out and says hi 👋 |
-| Click it | opens |
-| Hover Mochi | blinks, eyes grow |
-| Click Mochi | squish + annoyed |
-| Click 3 times fast | 😵‍💫 dizzy for a few seconds |
-| Drag a file onto the island | turns into a box and swallows it |
-| Drag Mochi onto a window *(macOS)* | attaches it as context |
+| Hover the notch | the island opens |
+| Hover Dew | blinks, eyes grow |
+| Click Dew | squish + annoyed; three fast clicks and it's dizzy |
+| Leave the pointer on it | after a few seconds everything settles, like a drop at rest |
+| Drag a file onto the island | turns into a glass box and swallows it |
+| Drag Dew onto a window | attaches it as context |
+| Play music | puts on headphones; the track change slides out of the notch |
+| Start a timer | a small countdown ring sits beside the notch |
+| Plug in the charger | a short "charging" banner, and a zap |
 
-## How it works
+## Under the hood
 
-**macOS**
+- **Island:** a borderless `NSPanel` hugging the notch, driven by a small state machine (`hidden → petit → home`). The body is `glassEffect` on macOS 26 with a drifting mesh of the current state's colour behind it.
+- **Dew:** two SwiftUI `Canvas` layers with real glass between them (`DewBody.swift`, `BotEngine.swift`). The lower canvas draws the hands and the liquid, the glass bends it, the upper canvas adds the light in the drop, the eyes, the badge and the props. Pose, blinks, looks and emotes come from a 60-step-per-second engine that only runs while something moves. Beside the folded notch and in the pills, Dew is canvas-only (there is only black to bend there).
+- **Claude Code:** a tiny `nb-hook` script receives hook events and forwards them over a Unix socket to the app. For approvals it waits for your click, then answers the hook. Sessions are matched to their terminal by TTY so the island can jump to the right tab.
+- **Chat:** through the `claude` CLI (`-p`, streaming JSON), so it uses your plan; usage numbers come from the same stream.
+- **Monitors:** music via the players' distributed notifications (no polling), timers and system stats on slow timers that run only when their pill is on, weather every 30 minutes.
+- **Sounds:** short WAVs through preloaded `AVAudioPlayer`s.
 
-- **Island**: a borderless `NSPanel` hugging the notch, driven by a small state machine (`hidden → petit → home`).
-- **Character**: drawn in SwiftUI `Canvas` + `TimelineView` at 60 fps — squircle body, eyes projected on a sphere, spring animations. No Rive, no Lottie, no images.
-- **Claude Code**: a tiny `nb-hook` script receives hook events and forwards them over a Unix socket to the app. For approvals it waits for your click, then answers the hook.
-- **Integrations**: lightweight pollers, paused when nothing is watching.
-- **Sounds**: 28 short WAVs played through preloaded `AVAudioPlayer`s.
+Native Swift 6 / SwiftUI / AppKit, strict concurrency, **zero third-party dependencies**.
 
-The macOS app is native Swift 6 / SwiftUI / AppKit with **zero third-party dependencies**.
+### Debug launch arguments
 
-**Windows**
+Every screenshot and GIF in this README was taken with these (Debug builds only), over a temporary test wallpaper, with nothing touching the mouse:
 
-- A [Tauri 2](https://tauri.app) app (Rust + TypeScript): the island is a transparent, always-on-top window that never steals focus, Mochi is drawn in Canvas 2D with the same shapes, timings and sounds as on the Mac.
-- Claude Code hooks go through a tiny `coucou-hook.exe` and a named pipe; keys live in Windows Credential Manager.
-- Details and differences in [`windows/README.md`](windows/README.md).
+```
+-debugView overview|prompt|settings   open a view      -debugState working|approval|finished|…   force Dew's state
+-debugFocus integration_music|timer|…  open a card      -debugProps "headphones,mug,party,laptop"  dress Dew
+-debugSamples 1   sample sessions, shelf, clips, notes  -debugUpload 1 [-debugDrop 1]              drop zone (+ the drop)
+-debugLively 1    animate as if the pointer were on it  -debugBounce 1                             open/close on a loop, logs frame times
+-debugFrames 1    log render passes and why, every 5 s  -debugDewGlass 0                           Dew without the real glass
+-debugWeather rain|sun|snow   -debugTimer 600   -debugPower charge|low   -debugHUD volume   -debugClaude finished|needs
+```
 
-## Contributing
+Logs go to `~/Library/Logs/NotchBuddy/nb.log`.
 
-Issues and PRs are very welcome — new integrations, new emotes, new sounds, bug fixes. See [CONTRIBUTING.md](CONTRIBUTING.md).
+## Status
 
-## Credits
+This is a fork of [Coucou](https://github.com/Louis-CFM/coucou) that grew its own character and a different idea of what the island should cost. It is being renamed: the character is done, the **app name (Dewdrop), icon, sounds and bundle identifier are still being decided**, and until the upstream name, icon and sounds are replaced the repository stays private (see the licence note below). The upstream Windows port is not part of this fork.
 
-Built by [Louis Raillé](https://louisraille.fr) with Claude Code.
-Inspired by the notch-companion concepts shared by design studios — this project is independent and not affiliated with any of them.
+What is different from upstream, in short: sessions from any terminal (not only VS Code) and a jump back to their tab · chat on your Claude subscription through the CLI · the live-activity pills (Music, Timer, System, Shelf, Clipboard, Notes), Dynamic-Island banners and the Claude hub · Liquid Glass styling of the island and a glass character · the energy work above (folded 12–15 % → ~1 %, open ~50 % → 1–13 %).
 
-## License
+## Credits & licence
 
-- **Code:** [MIT](LICENSE) — use it, fork it, learn from it, just keep the copyright notice.
-- **Name, Mochi character, icon, sounds and media:** © Louis Raillé, all rights reserved — see [LICENSE-ASSETS.md](LICENSE-ASSETS.md). Shipping your own fork? Give it your own name and character.
+Dewdrop started as a fork of **Coucou** by [Louis Raillé](https://louisraille.fr), who had the idea of an open notch companion for Claude Code and built most of what you see here — the island, the hooks, the integrations, the sounds and the Mochi character this one replaced. Thank you.
 
-<div align="center">
+- **Code:** [MIT](LICENSE) — the original copyright notice is kept, as the licence asks.
+- **The names "Coucou" and "Mochi", the Mochi character, the original icon, sounds and media** are © Louis Raillé, all rights reserved ([LICENSE-ASSETS.md](LICENSE-ASSETS.md)). Dew, its animations and the images in this README are this fork's own.
 
-**If Mochi made you smile, a ⭐ helps a lot.**
-
-[Website](https://louis-cfm.github.io/coucou/) · [Privacy](https://louis-cfm.github.io/coucou/privacy.html) · [Terms](https://louis-cfm.github.io/coucou/terms.html) · [Support](https://louis-cfm.github.io/coucou/support.html)
-
-</div>
+Built with [Claude Code](https://claude.com/claude-code).

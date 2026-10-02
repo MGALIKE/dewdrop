@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## Fork (Dewdrop) — unreleased
+
+- Dew: a new character made of real Liquid Glass, with a liquid inside that takes Claude's state colour; new greeting and file-drop animations; props refitted
+- Energy: event-driven character canvas, motion tiers, one shared `Beat` timer instead of `TimelineView` for all repeating motion, pointer polling that stops when the pointer rests, monitors that exist only while the island is open — folded ~1 %, open with the pointer away 1–4 % (was 12–15 % and ~50 %)
+- Sessions from any terminal (not only VS Code), with a jump back to the exact tab
+- Chat through the Claude Code CLI (uses the subscription; no API key needed)
+- Live-activity pills: Music, Timer, System, Shelf, Clipboard, Notes; compact Dynamic-Island banners when folded; Claude hub (usage, recent sessions)
+- Liquid Glass styling of the island; weather in the header; keep-awake
+- Removed from this fork: the Windows port and the upstream website pages
+
+## Upstream — unreleased (as of the fork point)
 
 - Compact island on screens without a notch (#22) — thanks @Kamasoutra
 - Only web links (http/https) open from the notch; other kinds of links from Claude or integrations are ignored (#16) — thanks @Cris1670

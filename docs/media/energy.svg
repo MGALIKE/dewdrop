@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="310" viewBox="0 0 760 310" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<style>text{fill:#8b949e;font-size:13px}.v{font-weight:600}.b{fill:#3B9EFF}.o{fill:#8b949e;fill-opacity:.45}.t{font-size:12px}</style>
+<text x="250" y="18" class="t">CPU % of one core (Activity Monitor “Energy Impact” on an M-series Mac) — before this fork’s energy work vs now</text>
+<text x="0" y="62">Folded, nothing moving</text>
+<rect class="o" x="250" y="40" width="22" height="16" rx="4"/><text class="v" x="280" y="53">1.5%</text>
+<rect class="b" x="250" y="60" width="12" height="16" rx="4"/><text class="v" x="270" y="73" style="fill:#3B9EFF">0.8%</text>
+<text x="0" y="116">Open, idle, pointer away</text>
+<rect class="o" x="250" y="94" width="59" height="16" rx="4"/><text class="v" x="317" y="107">4%</text>
+<rect class="b" x="250" y="114" width="22" height="16" rx="4"/><text class="v" x="280" y="127" style="fill:#3B9EFF">1.5%</text>
+<text x="0" y="170">Open while Claude works</text>
+<rect class="o" x="250" y="148" width="205" height="16" rx="4"/><text class="v" x="463" y="161">14%</text>
+<rect class="b" x="250" y="168" width="54" height="16" rx="4"/><text class="v" x="312" y="181" style="fill:#3B9EFF">3.7%</text>
+<text x="0" y="224">Pointer on the island, moving</text>
+<rect class="o" x="250" y="202" width="403" height="16" rx="4"/><text class="v" x="661" y="215">27.5%</text>
+<rect class="b" x="250" y="222" width="176" height="16" rx="4"/><text class="v" x="434" y="235" style="fill:#3B9EFF">12%</text>
+<text x="0" y="278">Pointer parked on the island</text>
+<rect class="o" x="250" y="256" width="403" height="16" rx="4"/><text class="v" x="661" y="269">27.5%</text>
+<rect class="b" x="250" y="276" width="44" height="16" rx="4"/><text class="v" x="302" y="289" style="fill:#3B9EFF">3%</text>
+</svg>

@@ -1,25 +1,27 @@
-# Coucou — guide for AI coding agents
+# Dewdrop — guide for AI coding agents
 
-Coucou is a native macOS app: Mochi, a small animated character living in the MacBook notch, shows Claude Code sessions and a few integrations, and lets the user approve, answer, chat and drop files from the notch.
+Dewdrop (a fork of Coucou, being renamed) is a native macOS app: Dew, a small glass drop living in the MacBook notch, shows Claude Code sessions and a few live activities, and lets the user approve, answer, chat and drop files from the notch.
 
 ## Where things are
-- `NotchBuddy/Sources/App/` — all Swift code. `NotchBuddy/Resources/sounds/` — the 28 WAV sounds. `NotchBuddy/project.yml` — XcodeGen project (never edit the `.xcodeproj` by hand).
-- `docs/SPEC.md`, `docs/INTEGRATIONS.md` — behaviour, views, states, integrations (in French).
-- `design/prototype/notch-buddy.html` — original prototype, the visual source of truth. `design/captures/` — target screenshots.
-- `docs/*.html` — the GitHub Pages site (privacy, terms, support, legal notice).
+- `NotchBuddy/Sources/App/` — all Swift code. `BotEngine.swift` + `DewBody.swift` draw the character; `LiquidGlass.swift` holds the island's glass, the motion tiers (`IslandMotion`) and the shared `Beat` timer. `NotchBuddy/Resources/sounds/` — the WAV sounds (still the upstream set, to be replaced). `NotchBuddy/project.yml` — XcodeGen project (never edit the `.xcodeproj` by hand; new files need `xcodegen`).
+- `docs/SPEC.md`, `docs/INTEGRATIONS.md`, `docs/AGENTS.md` — behaviour, views, states, integrations (SPEC is in French and predates the fork).
+- `docs/ENERGY.md` — the energy budget, the measurements and the rules below in long form. `docs/media/` — the README's images and GIFs.
+- `design/animations/` — the HTML references the greeting and file-drop sequences were timed from.
 
 ## Build
 ```
 cd NotchBuddy && xcodegen && xcodebuild -scheme NotchBuddy -configuration Debug build
 ```
+Debug builds accept the `-debug…` launch arguments listed in the README; a Debug build with `SWIFT_OPTIMIZATION_LEVEL=-O` is what to install for visual checks (unoptimised, the animations stutter).
 
 ## Rules
-- Swift 6, SwiftUI + AppKit. No third-party dependencies unless truly unavoidable. The character is drawn in code (`Canvas` + `TimelineView`), no Rive/Lottie/images.
+- Swift 6, SwiftUI + AppKit, strict concurrency. No third-party dependencies unless truly unavoidable. The character is drawn in code (`Canvas` and real `glassEffect`), no Rive/Lottie/images.
 - Secrets live in the Keychain, never on disk or in git.
 - No telemetry. Network calls only to services the user configured.
 - Never block Claude Code: if the app doesn't answer, the hook exits immediately.
 - Never overwrite `~/.claude/settings.json`: dated backup, merge, show the diff, write only after the user confirms.
 - Never send an email or approve a Claude Code permission without an explicit click.
-- Performance: 0 % CPU when the island is hidden.
-- Keep the bundle identifier `fr.louisraille.NotchBuddy` (Keychain items, preferences and permissions depend on it).
-- Visual changes must match the prototype and the screenshots in `design/captures/`.
+- Energy (see `docs/ENERGY.md`): only the visible view is in the tree; nothing redraws unless something changed; repeating motion goes through `Beat`, never `TimelineView`, `.repeatForever` or a timer-retriggered implicit animation; all-day motion is a `CALayer`; no `NSHostingView` inside the island tree; judge every change by `pass=` in the `-debugFrames 1` log and by `top`, before and after. Targets: ~1 % folded, 1–4 % open with the pointer away.
+- Keep the bundle identifier `fr.louisraille.NotchBuddy` until the rename lands with a migration (Keychain items, preferences and permissions depend on it).
+- Check UI changes from screenshots (`screencapture` of the island region with the debug arguments), never by driving the user's mouse or keyboard.
+- The upstream asset licence (`LICENSE-ASSETS.md`) reserves the names Coucou and Mochi, the Mochi character, the original icon, sounds and media. Do not reintroduce them; the repository stays private until the icon and sounds are replaced.
