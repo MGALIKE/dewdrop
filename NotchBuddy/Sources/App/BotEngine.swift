@@ -79,17 +79,18 @@ enum BadgeType {
     case dot(CGColor)
 }
 
-// MARK: - Mochi track constants (from PISTES.mochi)
+// MARK: - Dew's proportions
 
-enum MochiConst {
-    static let eyeW: CGFloat  = 0.25
-    static let eyeH: CGFloat  = 0.27
-    static let eyeSp: CGFloat = 0.37
-    static let eyeP: CGFloat  = -0.12
-    static let baseTop    = CGColor(red: 0.929, green: 0.929, blue: 0.937, alpha: 1)  // #EDEDEF
-    static let baseBottom = CGColor(red: 0.769, green: 0.773, blue: 0.792, alpha: 1)  // #C4C5CA
-    static let ink        = CGColor(red: 0.102, green: 0.082, blue: 0.071, alpha: 1)  // #1A1412
-    static let miniInk    = CGColor(red: 0.063, green: 0.075, blue: 0.102, alpha: 1)  // #10131A
+enum DewConst {
+    static let rx: CGFloat    = 1.0     // bulb half-width, in R
+    static let ry: CGFloat    = 0.94    // bulb half-height, in R
+    static let tip: CGFloat   = 1.75    // where the two flanks would meet above the bulb's centre, in bulb radii
+    static let eyeW: CGFloat  = 0.21
+    static let eyeH: CGFloat  = 0.36
+    static let eyeSp: CGFloat = 0.40
+    static let eyeP: CGFloat  = -0.14
+    static let ink        = CGColor(red: 1, green: 1, blue: 1, alpha: 0.96)             // eyes are light in the glass
+    static let miniInk    = CGColor(red: 0.063, green: 0.075, blue: 0.102, alpha: 1)    // #10131A
 }
 
 // MARK: - Bot state configs
@@ -208,6 +209,13 @@ final class BotEngine: ObservableObject {
     // Particle canvas overhang (extra canvas height at top for hearts to fly into)
     var particleOverhang: CGFloat = 0
     var displayScale: CGFloat = 1      // on-screen scale of the canvas (the main Mochi is drawn large and scaled)
+    var glassUnder = false             // real Liquid Glass sits under the canvas (see DewGlass)
+
+    // The liquid Dew holds: its surface tips and ripples when Dew moves, then comes to rest
+    var slosh: CGFloat = 0             // angle of the surface (radians)
+    var sloshVel: CGFloat = 0
+    var ripple: CGFloat = 0            // how disturbed the surface is (0 = still)
+    private var sloshFrom: (ox: CGFloat, oy: CGFloat, tilt: CGFloat, sy: CGFloat) = (0, 0, 0, 1)
 
     // Mouth spring (fraction of R: 0=closed, 0.20=hover, 0.42=open, 0.50=overopen)
     var slotH: CGFloat = 0           // current height (fraction of R)
@@ -270,6 +278,7 @@ final class BotEngine: ObservableObject {
 
     // Timing
     var lastTime: Double = CACurrentMediaTime()
+    var lastTick: Date = .distantPast               // the timeline tick already stepped (see BotCanvasView.step)
     var lastMotion: Double = CACurrentMediaTime()   // last frame in which `isAnimating` was true
 
     // Energy: the canvas is only redrawn while something on Mochi changes (see `isAnimating`,
@@ -302,6 +311,7 @@ final class BotEngine: ObservableObject {
         setTarget(key: "tint", value: cfg.tint)
         setTarget(key: "tilt", value: cfg.tilt)
         setBadge(cfg.badge)
+        if !force { sloshVel += Bool.random() ? 0.9 : -0.9; ripple = 1 }   // a new state stirs the liquid
 
         switch newState {
         case .finished:
@@ -683,6 +693,7 @@ final class BotEngine: ObservableObject {
         if abs(col.0 - colT.0) + abs(col.1 - colT.1) + abs(col.2 - colT.2) > 0.01 { return true }
         if morph > 0.01 || slotH > 0.005 || abs(slotHTarget - slotH) > 0.005 || abs(ox) > 0.002 { return true }
         if isChewing || CACurrentMediaTime() < waveUntil { return true }
+        if abs(slosh) > 0.012 || abs(sloshVel) > 0.03 || ripple > 0.03 { return true }
         return propVel.contains { $0 != 0 }
     }
 
@@ -710,6 +721,7 @@ final class BotEngine: ObservableObject {
                 tp = tp * 0.3 + fixed.y * 0.5
             }
             if mood == .sleepy { tp -= 0.1 }
+            tp = max(-0.26, tp)       // same floor as in `update`
             if abs(ty - yaw) > 0.05 || abs(tp - pitch) > 0.05 { return true }
         }
         return false
@@ -783,7 +795,7 @@ final class BotEngine: ObservableObject {
         }
 
         tgYaw   = ty
-        tgPitch = tp
+        tgPitch = isMini ? tp : max(-0.26, tp)     // Dew's eyes stay on the bulb, not down at its rim
         tgTilt  = cfg.tilt
 
         // Body sway during greeting wave
@@ -921,6 +933,16 @@ final class BotEngine: ObservableObject {
         slotHVel += slotAcc * dtCG
         slotH = max(0, slotH + slotHVel * dtCG)
 
+        // The liquid: pushed by whatever moved the body, pulled back level by a loose spring
+        if !isMini {
+            let push = -(ox - sloshFrom.ox) * 9 - (tilt - sloshFrom.tilt) * 2.2
+            ripple = min(1, ripple * 0.90 + abs(oy - sloshFrom.oy) * 4 + abs(sy - sloshFrom.sy) * 5 + abs(push) * 1.5)
+            sloshFrom = (ox, oy, tilt, sy)
+            let omega: CGFloat = 2.8, zeta: CGFloat = 0.16
+            sloshVel += push + (-omega * omega * slosh - 2 * zeta * omega * sloshVel) * dtCG
+            slosh = max(-0.7, min(0.7, slosh + sloshVel * dtCG))
+        }
+
         updateProps(dt: dt)
         updateAntics(now: now)
 
@@ -933,8 +955,8 @@ final class BotEngine: ObservableObject {
         let W = size.width
         let H = size.height
         let R = W * 0.3
-        let rx = R * 1.14
-        let ry = R * 0.88
+        let rx = R * DewConst.rx
+        let ry = R * DewConst.ry
 
         let cx = W / 2 + ox * R
         // particleOverhang shifts the bot body down in canvas coords so hearts can fly into
@@ -946,17 +968,12 @@ final class BotEngine: ObservableObject {
         if tilt != 0 { ctx.rotate(by: .radians(tilt)) }
         ctx.scaleBy(x: sx, y: sy)
 
-        // Body path (superellipse for Mochi, morph to rect for upload)
-        let bodyPath = mochiPath(rx: rx, ry: ry, morph: morph, R: R)
+        // Body path (a drop, morphing to a box for upload)
+        let bodyPath = bodyPath(rx: rx, ry: ry, morph: morph, R: R)
 
-        // Body fill
-        drawBody(ctx: &ctx, path: bodyPath, R: R, rx: rx, ry: ry)
-
-        // Blush — always shows a floor proportional to tint (prototype behaviour)
-        let blushVal = max(blush, tint * 0.5) * (1 - morph)
-        if blushVal > 0.01 {
-            drawBlush(ctx: &ctx, path: bodyPath, rx: rx, ry: ry, R: R, blush: blushVal)
-        }
+        // The liquid, the glass and the light in it (DewBody.swift)
+        if !glassUnder { drawLiquid(ctx: ctx, path: bodyPath, R: R, rx: rx, ry: ry) }
+        drawDewBody(ctx: ctx, path: bodyPath, R: R, rx: rx, ry: ry)
 
         // Eyes
         drawEyes(ctx: &ctx, path: bodyPath, R: R, rx: rx, ry: ry)
@@ -1017,8 +1034,8 @@ final class BotEngine: ObservableObject {
         let R = W * 0.3
         // Only draw hands when Mochi is large enough to be meaningful (not compact/peek)
         guard R * displayScale > 14 else { return }
-        let rx = R * 1.14
-        let ry = R * 0.88
+        let rx = R * DewConst.rx
+        let ry = R * DewConst.ry
         let cx = W / 2 + ox * R
         let cy = H / 2 + particleOverhang / 2 + oy * R + R * 0.06
 
@@ -1083,27 +1100,8 @@ final class BotEngine: ObservableObject {
             var handPath = Path()
             handPath.addEllipse(in: handRect)
 
-            // Fill with body material (same gradient as body)
-            if let bc = bodyColor {
-                let c0 = mix3(cgColorToTuple(bc), (1, 1, 1), 0.35)
-                let c1 = cgColorToTuple(bc)
-                handCtx.fill(handPath, with: .linearGradient(
-                    Gradient(colors: [colorFromTuple(c0), colorFromTuple(c1)]),
-                    startPoint: CGPoint(x: hew * 0.7, y: -heh * 0.85),
-                    endPoint: CGPoint(x: -hew * 0.8, y: heh * 0.9)
-                ))
-            } else {
-                let c0 = cgColorToTuple(MochiConst.baseTop)
-                let c1 = cgColorToTuple(MochiConst.baseBottom)
-                handCtx.fill(handPath, with: .linearGradient(
-                    Gradient(colors: [colorFromTuple(c0), colorFromTuple(c1)]),
-                    startPoint: CGPoint(x: hew * 0.7, y: -heh * 0.85),
-                    endPoint: CGPoint(x: -hew * 0.8, y: heh * 0.9)
-                ))
-            }
-
-            // Subtle separation border — rgba(0,0,0,0.08) 1pt
-            handCtx.stroke(handPath, with: .color(Color.black.opacity(0.08)), lineWidth: 1)
+            // A bead of the same glass
+            drawBead(handCtx, in: handRect)
         }
     }
 
@@ -1111,8 +1109,8 @@ final class BotEngine: ObservableObject {
         let W = size.width
         let H = size.height
         let R = W * 0.3
-        let rx = R * 1.14
-        let ry = R * 0.88
+        let rx = R * DewConst.rx
+        let ry = R * DewConst.ry
         let cx = W / 2 + ox * R
         let cy = H / 2 + particleOverhang / 2 + oy * R + R * 0.06
 
@@ -1127,19 +1125,39 @@ final class BotEngine: ObservableObject {
 
     // MARK: - Private draw helpers
 
-    func mochiPath(rx: CGFloat, ry: CGFloat, morph: CGFloat, R: CGFloat) -> Path {
-        let n = 72
-        let expN: CGFloat = 2.0 / 2.7
+    /// Dew's outline at this moment (the tip leans the way Dew looks).
+    func bodyPath(rx: CGFloat, ry: CGFloat, morph: CGFloat, R: CGFloat) -> Path {
+        BotEngine.dropPath(rx: rx, ry: ry, R: R, lean: tipLean, morph: morph)
+    }
+
+    /// How far the tip bends sideways, in R.
+    var tipLean: CGFloat { sin(yaw) * 0.20 }
+
+    /// A drop around the centre of its bulb: a circle and the two tangents that meet above it,
+    /// with the point rounded off. `lean` bends the tip sideways (in R); `morph` squares the
+    /// drop into the file-drop box.
+    nonisolated static func dropPath(rx: CGFloat, ry: CGFloat, R: CGFloat, lean: CGFloat = 0, morph: CGFloat = 0) -> Path {
+        let n = 96
+        let cone = acos(1 / DewConst.tip)    // angle from straight up where the flank leaves the bulb
+        let soft: CGFloat = 0.16             // rounds the point
         // Target mailbox dims (spec: 1.0R wide, 0.94R tall, 0.42R corner radius)
         let tw = R * 1.0
         let th = R * 0.94
         let tr = R * 0.42
         var path = Path()
         for i in 0...n {
-            let a = CGFloat(i) / CGFloat(n) * .pi * 2
+            let a = CGFloat(i) / CGFloat(n) * .pi * 2 + .pi / 2      // start at the bottom, away from the tip
             let ca = cos(a), sa = sin(a)
-            let px0 = rx * (ca >= 0 ? pow(ca, expN) : -pow(-ca, expN))
-            let py0 = ry * (sa >= 0 ? pow(sa, expN) : -pow(-sa, expN))
+            let phi = acos(max(-1, min(1, -sa)))                     // angle from straight up
+            var rho: CGFloat = 1
+            var bend: CGFloat = 0
+            if phi < cone {
+                let k = soft * (1 - phi / cone)
+                rho = 1 / cos(cone - (phi * phi + k * k).squareRoot())
+                bend = lean * R * pow(1 - phi / cone, 2)
+            }
+            let px0 = rx * ca * rho + bend
+            let py0 = ry * sa * rho
             let px: CGFloat
             let py: CGFloat
             if morph < 0.005 {
@@ -1157,7 +1175,7 @@ final class BotEngine: ObservableObject {
     }
 
     /// Ray-rounded-rect intersection: find the point on the rounded rect boundary in direction (ca, sa).
-    private func rrPoint(ca: CGFloat, sa: CGFloat, W: CGFloat, H: CGFloat, cr: CGFloat) -> CGPoint {
+    private nonisolated static func rrPoint(ca: CGFloat, sa: CGFloat, W: CGFloat, H: CGFloat, cr: CGFloat) -> CGPoint {
         let eps: CGFloat = 1e-6
         let kx: CGFloat = ca >= 0 ? 1 : -1
         let ky: CGFloat = sa >= 0 ? 1 : -1
@@ -1197,66 +1215,6 @@ final class BotEngine: ObservableObject {
         return CGPoint(x: kx * W, y: ky * H)
     }
 
-    private func drawBody(ctx: inout GraphicsContext, path: Path, R: CGFloat, rx: CGFloat, ry: CGFloat) {
-        if let bc = bodyColor {
-            // Mini bots: flat solid fill — no gradient, no reflection, no highlight
-            ctx.fill(path, with: .color(Color(cgColor: bc)))
-        } else {
-            // Main bot: linear gradient body
-            let c0 = cgColorToTuple(MochiConst.baseTop)
-            let c1 = cgColorToTuple(MochiConst.baseBottom)
-            ctx.fill(path, with: .linearGradient(
-                Gradient(colors: [colorFromTuple(c0), colorFromTuple(c1)]),
-                startPoint: CGPoint(x: rx*0.7, y: -ry*0.85),
-                endPoint: CGPoint(x: -rx*0.8, y: ry*0.9)
-            ))
-            // State tint — fades out as morph increases (mailbox has no tint)
-            let effectiveTint = tint * (1 - morph)
-            if effectiveTint > 0.01 {
-                let tc = colorFromTuple(col)
-                ctx.fill(path, with: .linearGradient(
-                    Gradient(stops: [
-                        .init(color: tc.opacity(Double(0.72 * effectiveTint)), location: 0),
-                        .init(color: tc.opacity(0), location: 1)
-                    ]),
-                    startPoint: CGPoint(x: 0, y: ry),
-                    endPoint: CGPoint(x: 0, y: -ry)
-                ))
-            }
-            // Shadow rim
-            ctx.fill(path, with: .radialGradient(
-                Gradient(stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .clear, location: 0.6),
-                    .init(color: Color.black.opacity(0.2), location: 1)
-                ]),
-                center: .zero, startRadius: R*0.15, endRadius: R*1.25
-            ))
-            // Highlight
-            ctx.fill(path, with: .radialGradient(
-                Gradient(stops: [
-                    .init(color: Color.white.opacity(0.55), location: 0),
-                    .init(color: .clear, location: 1)
-                ]),
-                center: CGPoint(x: rx*0.34, y: -ry*0.46),
-                startRadius: 0,
-                endRadius: R*0.42
-            ))
-        }
-    }
-
-    private func drawBlush(ctx: inout GraphicsContext, path: Path, rx: CGFloat, ry: CGFloat, R: CGFloat, blush: CGFloat) {
-        ctx.clip(to: path)
-        let yOffset = sin(yaw) * rx * 0.8
-        for sd in [-1.0, 1.0] {
-            let bx = CGFloat(sd) * rx * 0.55 + yOffset
-            let by = ry * 0.2
-            var ellipse = Path()
-            ellipse.addEllipse(in: CGRect(x: bx - R*0.17, y: by - R*0.1, width: R*0.34, height: R*0.2))
-            ctx.fill(ellipse, with: .color(Color(red: 1, green: 0.471, blue: 0.588, opacity: Double(0.5 * blush))))
-        }
-    }
-
     private func drawEyes(ctx: inout GraphicsContext, path: Path, R: CGFloat, rx: CGFloat, ry: CGFloat) {
         var shape = eyeOverride ?? hintEye ?? moodEye ?? cfg.eye
         // In box mode: cup eyes when file over box (slotHTarget set), happy arcs while chewing
@@ -1267,8 +1225,8 @@ final class BotEngine: ObservableObject {
         ctx.clip(to: path)
 
         for sd in [-1.0, 1.0] {
-            let eyeYaw   = CGFloat(sd) * MochiConst.eyeSp + yaw
-            var eyePitch = MochiConst.eyeP + pitch + roll
+            let eyeYaw   = CGFloat(sd) * DewConst.eyeSp + yaw
+            var eyePitch = DewConst.eyeP + pitch + roll
             // Wrap pitch for roll-through effect
             eyePitch = ((eyePitch + .pi).truncatingRemainder(dividingBy: .pi*2) + .pi*2).truncatingRemainder(dividingBy: .pi*2) - .pi
 
@@ -1282,10 +1240,13 @@ final class BotEngine: ObservableObject {
             let fy = lerp(max(0.18, cp),          1, morph * 0.7)
 
             let eyeMult: CGFloat = isMini ? 1.9 : 1.0
-            let ew = R * MochiConst.eyeW * es * eyeMult
-            let eh = R * MochiConst.eyeH * es * eyeMult
+            let ew = R * DewConst.eyeW * es * eyeMult
+            let eh = R * DewConst.eyeH * es * eyeMult
 
             var eyeCtx = ctx
+            if !isMini {
+                eyeCtx.addFilter(.shadow(color: .black.opacity(0.38), radius: R * 0.05, x: 0, y: R * 0.02))
+            }
             eyeCtx.translateBy(x: ex, y: ey)
             eyeCtx.scaleBy(x: fx, y: fy)
             drawEyeShape(ctx: &eyeCtx, shape: shape, w: ew, h: eh, open: open, sd: CGFloat(sd), R: R)
@@ -1293,7 +1254,7 @@ final class BotEngine: ObservableObject {
     }
 
     private func drawEyeShape(ctx: inout GraphicsContext, shape: EyeShape, w: CGFloat, h: CGFloat, open: CGFloat, sd: CGFloat, R: CGFloat) {
-        let ink = isMini ? Color(cgColor: MochiConst.miniInk) : Color(cgColor: MochiConst.ink)
+        let ink = isMini ? Color(cgColor: DewConst.miniInk) : Color(cgColor: DewConst.ink)
         let now = CGFloat(CACurrentMediaTime())
 
         switch shape {
@@ -1583,7 +1544,7 @@ private func mixColor(_ a: (CGFloat,CGFloat,CGFloat), _ b: (CGFloat,CGFloat,CGFl
     mix3(a, b, t)
 }
 
-private func colorFromTuple(_ t: (CGFloat,CGFloat,CGFloat)) -> Color {
+func colorFromTuple(_ t: (CGFloat,CGFloat,CGFloat)) -> Color {
     Color(red: Double(t.0), green: Double(t.1), blue: Double(t.2))
 }
 

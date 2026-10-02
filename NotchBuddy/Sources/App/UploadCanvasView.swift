@@ -7,6 +7,12 @@ import AppKit
 struct UploadCanvasView: View {
     @ObservedObject var state: AppState
     @State private var fileIcon: NSImage? = nil
+    @StateObject private var dew = BotEngine()   // only for its drawing code and the liquid's state
+
+    private var glass: Bool {
+        if #available(macOS 26.0, *) { return !DewDebug.noGlass }
+        return false
+    }
 
     private var engine: UploadSequenceEngine { .shared }
 
@@ -15,11 +21,27 @@ struct UploadCanvasView: View {
             let f = engine.frame(at: tl.date)
             let wallTime = tl.date.timeIntervalSinceReferenceDate
 
+            let _ = tune(f)
+
+            // Dew's body is real glass between two canvases, like in the open island
             ZStack(alignment: .topLeading) {
                 Canvas { ctx, _ in
                     drawScene(ctx: ctx, f: f, wallTime: wallTime)
                 }
                 .frame(width: 640, height: 176)
+
+                if #available(macOS 26.0, *), glass {
+                    DewGlass(pose: dewPose(f))
+                        .frame(width: 640, height: 176)
+                }
+
+                Canvas { ctx, _ in
+                    var c = ctx
+                    drawDewOver(ctx: &c, f: f)
+                    if f.fileVisible { drawFile(ctx: &c, f: f) }
+                }
+                .frame(width: 640, height: 176)
+                .allowsHitTesting(false)
 
                 // Interactive choose buttons (invisible hit areas at reference positions)
                 if f.chooseAlpha > 0 {
@@ -165,11 +187,8 @@ struct UploadCanvasView: View {
             drawChooseView(ctx: &c, f: f)
         }
 
-        // ── Mochi ─────────────────────────────────────────────────
-        drawMochi(ctx: &c, f: f)
-
-        // ── File / suction ────────────────────────────────────────
-        if f.fileVisible { drawFile(ctx: &c, f: f) }
+        // ── Dew: what is behind its glass (the rest is drawn in front, with the file) ──
+        drawDewUnder(ctx: c, f: f)
     }
 
     // MARK: - Drop zone text + chips
@@ -319,37 +338,52 @@ struct UploadCanvasView: View {
         }
     }
 
-    // MARK: - Mochi (superellipse body + eyes + mouth)
+    // MARK: - Dew (a drop that becomes a glass box with a slot, and back)
 
-    private func drawMochi(ctx: inout GraphicsContext, f: USFrame) {
-        let R  = f.d / 2 / 1.04
-        let m  = f.morph
-        let mc = max(0, min(m, 1.0))
+    private func dewR(_ f: USFrame) -> CGFloat { CGFloat(f.d / 2 / 1.04) }
+    private func dewMorph(_ f: USFrame) -> CGFloat { CGFloat(max(0, min(f.morph, 1.0))) }
 
+    private func dewPose(_ f: USFrame) -> DewPose {
+        DewPose(center: CGPoint(x: f.x, y: f.y + f.hop), R: dewR(f), sx: f.sx, sy: f.sy,
+                tilt: f.tilt, lean: 0, morph: dewMorph(f))
+    }
+
+    private func dewPath(_ f: USFrame) -> Path {
+        let R = dewR(f)
+        return BotEngine.dropPath(rx: R * DewConst.rx, ry: R * DewConst.ry, R: R, morph: dewMorph(f))
+    }
+
+    private func dewContext(_ ctx: GraphicsContext, f: USFrame) -> GraphicsContext {
         var c = ctx
         c.concatenate(CGAffineTransform(translationX: CGFloat(f.x), y: CGFloat(f.y + f.hop)))
         c.concatenate(CGAffineTransform(rotationAngle: CGFloat(f.tilt)))
         c.concatenate(CGAffineTransform(scaleX: CGFloat(f.sx), y: CGFloat(f.sy)))
+        return c
+    }
 
-        let (bp, rx, ry) = usBodyPath(m: m, R: R)
+    /// What the upload asks of the shared drawing code: Dew fills with green as the file goes up.
+    private func tune(_ f: USFrame) {
+        dew.col = (0.204, 0.831, 0.600)
+        dew.tint = CGFloat(0.08 + 0.78 * max(0, min(f.progress, 1)))
+        dew.tilt = CGFloat(f.tilt)
+        dew.morph = dewMorph(f)
+        dew.glassUnder = glass
+        dew.displayScale = 1
+    }
 
-        // ── Body gradient ──────────────────────────────────────────
-        let bodyGrad = Gradient(stops:[
-            .init(color: Color(hex:"#EDEDEF"), location:0),
-            .init(color: Color(hex:"#C4C5CA"), location:1)
-        ])
-        c.fill(bp, with: .linearGradient(bodyGrad,
-            startPoint:  CGPoint(x:  rx*0.7, y: -ry*0.9),
-            endPoint:    CGPoint(x: -rx*0.8, y:  ry*0.9)))
+    private func drawDewUnder(ctx: GraphicsContext, f: USFrame) {
+        let R = dewR(f)
+        dew.drawLiquid(ctx: dewContext(ctx, f: f), path: dewPath(f), R: R, rx: R * DewConst.rx, ry: R * DewConst.ry)
+    }
 
-        // ── Edge shadow ────────────────────────────────────────────
-        let shadowGrad = Gradient(stops:[
-            .init(color: .clear, location:0),
-            .init(color: .clear, location:0.62),
-            .init(color: Color.black.opacity(0.12), location:1)
-        ])
-        c.fill(bp, with: .radialGradient(shadowGrad,
-            center: CGPoint(x:0,y:0), startRadius: CGFloat(R*0.2), endRadius: CGFloat(R*1.3)))
+    private func drawDewOver(ctx: inout GraphicsContext, f: USFrame) {
+        let R  = Double(dewR(f))
+        let mc = Double(dewMorph(f))
+        let rx = R * Double(DewConst.rx), ry = R * Double(DewConst.ry)
+        let c  = dewContext(ctx, f: f)
+        let bp = dewPath(f)
+
+        dew.drawDewBody(ctx: c, path: bp, R: CGFloat(R), rx: CGFloat(rx), ry: CGFloat(ry))
 
         // ── Top rim (box mode) ─────────────────────────────────────
         if mc > 0.3 {
@@ -391,15 +425,16 @@ struct UploadCanvasView: View {
         }
 
         // ── Eyes ───────────────────────────────────────────────────
-        let ew = R * 0.25
-        let eh = R * (0.62 - 0.16*mc)
-        let ey = R * (0.02 + 0.28*mc)
-        let sp = R * 0.30
+        let ew = R * Double(DewConst.eyeW)
+        let eh = R * (Double(DewConst.eyeH) + 0.08*mc)
+        let ey = ry * (0.13 + 0.14*mc)
+        let sp = R * (0.39 - 0.07*mc)
         let lx = f.lookX * R * (0.34 - 0.08*mc)
         let ly = f.lookY * R * (0.16 - 0.09*mc)
 
         var eCtx = c
         eCtx.clip(to: bp)
+        if R > 9 { eCtx.addFilter(.shadow(color: .black.opacity(0.38), radius: R * 0.05, x: 0, y: R * 0.02)) }
         for sd in [-1.0, 1.0] {
             var ec = eCtx
             ec.concatenate(CGAffineTransform(translationX: CGFloat(sd*sp+lx), y: CGFloat(ey+ly)))
@@ -410,7 +445,7 @@ struct UploadCanvasView: View {
     // MARK: - Eye shapes
 
     private func drawEyeShape(ctx: inout GraphicsContext, shape: USEyeShape, w: CGFloat, h: CGFloat) {
-        let ink = Color(red:0.055,green:0.059,blue:0.071)
+        let ink = Color(cgColor: DewConst.ink)
         switch shape {
         case .pill:
             var p = Path()
@@ -579,26 +614,6 @@ private func drawDocCG(cg: CGContext, cx: Double, cy: Double, wsc: Double, hsc: 
     cg.setFillColor(CGColor(red:0.231,green:0.510,blue:0.961,alpha:1))
     cg.addRect(CGRect(x:x+w*0.18, y:y+h*0.58, width:w*0.64, height:h*0.16))
     cg.fillPath()
-}
-
-// MARK: - Superellipse body path (port of reference bodyPath(m, R))
-
-func usBodyPath(m: Double, R: Double) -> (path: Path, rx: Double, ry: Double) {
-    let mc = max(0, min(m, 1.0))
-    let n  = 2.15 + (5.5-2.15)*mc
-    let rx = R * (1.04 - 0.04*mc)
-    let ry = R * (0.97 - 0.03*mc)
-    var path = Path()
-    for i in 0...96 {
-        let a  = Double(i)/96 * .pi*2
-        let ca = cos(a), sa = sin(a)
-        let px = rx * (ca<0 ? -1 : ca>0 ? 1 : 0) * pow(abs(ca), 2/n)
-        let py = ry * (sa<0 ? -1 : sa>0 ? 1 : 0) * pow(abs(sa), 2/n)
-        if i == 0 { path.move(to:    CGPoint(x:px,y:py)) }
-        else       { path.addLine(to: CGPoint(x:px,y:py)) }
-    }
-    path.closeSubpath()
-    return (path, rx, ry)
 }
 
 // MARK: - Rounded rect helper (mirrors reference rr())

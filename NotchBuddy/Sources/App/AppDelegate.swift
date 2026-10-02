@@ -144,6 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let views = ud.string(forKey: "debugView")      // "overview,prompt,settings": opens the first, then steps through the rest
         if ud.bool(forKey: "debugBounce") {
             SoundEngine.shared.enabled = false
+            if samples { Self.sampleSessions(AppState.shared) }
+            if let props { AppState.shared.propsOverride = Self.props(named: props) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 9) { PerfProbe.shared.bounce() }
             return
         }
@@ -151,21 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 || upload || props != nil || confetti || power != nil || hud != nil || claude != nil
                 || weather != nil || bot != nil || views != nil || lively else { return }
         if let bot, let forced = BotState(rawValue: bot) { AppState.shared.stateOverride = forced }
-        if let props {
-            var set: BotProps = []
-            if props.contains("headphones") { set.insert(.headphones) }
-            if props.contains("mug") { set.insert(.mug) }
-            if props.contains("nightcap") { set.insert(.nightcap) }
-            if props.contains("party") { set.insert(.partyHat) }
-            if props.contains("sunglasses") { set.insert(.sunglasses) }
-            if props.contains("umbrella") { set.formUnion([.umbrella, .rainfall]) }
-            if props.contains("scarf") { set.formUnion([.scarf, .snowfall]) }
-            if props.contains("laptop") { set.insert(.laptop) }
-            if props.contains("magnifier") { set.insert(.magnifier) }
-            if props.contains("bandage") { set.insert(.bandage) }
-            if props.contains("pencil") { set.insert(.pencil) }
-            AppState.shared.propsOverride = set
-        }
+        if let props { AppState.shared.propsOverride = Self.props(named: props) }
         SoundEngine.shared.enabled = false   // visual checks only — stay quiet
         DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { [weak self] in
             let state = AppState.shared
@@ -192,9 +180,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if awake { KeepAwake.shared.set(true) }
             if confetti { self?.debugConfetti(rounds: 8) }
             if samples {
-                state.notes = [NoteItem(text: "Ask Louis about the notch API", date: Date().addingTimeInterval(-200)),
+                Self.sampleSessions(state)
+                state.notes = [NoteItem(text: "Ask the team about the notch API", date: Date().addingTimeInterval(-200)),
                                NoteItem(text: "Buy oat milk", date: Date().addingTimeInterval(-4000), done: true),
-                               NoteItem(text: "Idea: Mochi wears a scarf when it snows", date: Date().addingTimeInterval(-90000))]
+                               NoteItem(text: "Idea: Dew wears a scarf when it snows", date: Date().addingTimeInterval(-90000))]
             }
             if let weather {
                 let codes = ["rain": 63, "sun": 0, "snow": 73, "storm": 95, "cloud": 3]
@@ -236,6 +225,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // The drop zone as it looks while a file hovers over the notch
                 UploadSequenceEngine.shared.enterZone(x: 320, y: 90)
                 self?.islandController?.expand(to: .upload)
+                // With "-debugDrop 1": also play what follows a drop (animation only, nothing is sent)
+                if ud.bool(forKey: "debugDrop") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        state.view = .uploading
+                        UploadSequenceEngine.shared.performDrop(uploadDuration: 2.4)
+                    }
+                }
             }
             if let longTitle {
                 // After the card's own refresh has landed
@@ -255,6 +251,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             state.isPinned = true
         }
+    }
+
+    /// Sample Claude Code sessions for screenshots, so no real project name shows.
+    private static func sampleSessions(_ state: AppState) {
+        // Sample Claude Code sessions (so screenshots show no real project names)
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        state.claudeSessions = [
+            ClaudeSession(id: "sample-1", title: "Add dark mode to the settings window", cwd: home + "/Code/notch-app",
+                          modified: Date(), livePid: ProcessInfo.processInfo.processIdentifier, busy: true),
+            ClaudeSession(id: "sample-2", title: "Fix the flaky upload test", cwd: home + "/Code/api",
+                          modified: Date().addingTimeInterval(-14 * 60)),
+            ClaudeSession(id: "sample-3", title: "Write the release notes", cwd: home + "/Code/docs",
+                          modified: Date().addingTimeInterval(-49 * 60)),
+        ]
+        ClaudeHub.shared.frozen = true
+    }
+
+    private static func props(named props: String) -> BotProps {
+        var set: BotProps = []
+        if props.contains("headphones") { set.insert(.headphones) }
+        if props.contains("mug") { set.insert(.mug) }
+        if props.contains("nightcap") { set.insert(.nightcap) }
+        if props.contains("party") { set.insert(.partyHat) }
+        if props.contains("sunglasses") { set.insert(.sunglasses) }
+        if props.contains("umbrella") { set.formUnion([.umbrella, .rainfall]) }
+        if props.contains("scarf") { set.formUnion([.scarf, .snowfall]) }
+        if props.contains("laptop") { set.insert(.laptop) }
+        if props.contains("magnifier") { set.insert(.magnifier) }
+        if props.contains("bandage") { set.insert(.bandage) }
+        if props.contains("pencil") { set.insert(.pencil) }
+        return set
     }
 
     /// Runs `show` once the island is folded (the greeting holds it open for a while after launch).

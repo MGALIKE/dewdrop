@@ -192,8 +192,8 @@ extension BotEngine {
         guard !isMini, morph < 0.3, propAmount.contains(where: { $0 > 0.01 }) else { return }
         let W = size.width, H = size.height
         let R = W * 0.3
-        let rx = R * 1.14
-        let ry = R * 0.88
+        let rx = R * DewConst.rx
+        let ry = R * DewConst.ry
         let cx = W / 2 + ox * R
         let cy = H / 2 + particleOverhang / 2 + oy * R + R * 0.06
 
@@ -207,7 +207,7 @@ extension BotEngine {
         let t = CGFloat(CACurrentMediaTime() - t0)
 
         func amount(_ prop: BotProps) -> CGFloat { propAmount[BotProps.index(prop)] }
-        let body = mochiPath(rx: rx, ry: ry, morph: morph, R: R)
+        let body = bodyPath(rx: rx, ry: ry, morph: morph, R: R)
 
         // Weather falls in the canvas itself, not on the tilted body
         if amount(.rainfall) > 0.01 { drawRain(context, amount: amount(.rainfall), cx: cx, cy: cy, R: R, t: t) }
@@ -342,11 +342,11 @@ extension BotEngine {
         // Slide down from the forehead onto the eyes
         ctx.translateBy(x: 0, y: -(1 - min(1, amount)) * R * 0.55)
 
-        let cp = cos(MochiConst.eyeP + pitch)
-        let ey = -sin(MochiConst.eyeP + pitch) * ry
+        let cp = cos(DewConst.eyeP + pitch)
+        let ey = -sin(DewConst.eyeP + pitch) * ry
         let w = R * 0.60, h = R * 0.40
         var centres: [CGFloat] = []
-        for sd in [CGFloat(-1), 1] { centres.append(sin(sd * MochiConst.eyeSp + yaw) * cp * rx) }
+        for sd in [CGFloat(-1), 1] { centres.append(sin(sd * DewConst.eyeSp + yaw) * cp * rx) }
         // Bridge and arms first, lenses on top
         var frame = Path()
         frame.move(to: CGPoint(x: centres[0], y: ey - h * 0.18))
@@ -388,9 +388,7 @@ extension BotEngine {
         // Hands tapping at the sides
         for sd in [CGFloat(-1), 1] {
             let tap = max(0, sin(t * 15 + (sd > 0 ? 1.7 : 0))) * R * 0.07
-            let hand = Path(ellipseIn: CGRect(x: sd * w * 0.60 - R * 0.13, y: h * 0.36 - tap, width: R * 0.26, height: R * 0.20))
-            ctx.fill(hand, with: .color(Color(cgColor: bodyColor ?? MochiConst.baseTop)))
-            ctx.stroke(hand, with: .color(Color.black.opacity(0.10)), lineWidth: max(0.5, R * 0.02))
+            drawBead(ctx, in: CGRect(x: sd * w * 0.60 - R * 0.13, y: h * 0.36 - tap, width: R * 0.26, height: R * 0.20))
         }
         let lid = Path(roundedRect: CGRect(x: -w / 2, y: -h / 2, width: w, height: h),
                        cornerSize: CGSize(width: R * 0.09, height: R * 0.09), style: .continuous)

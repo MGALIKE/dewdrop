@@ -27,7 +27,7 @@ private enum GT {
 
 // MARK: - Geometry constants (640×150 reference space)
 
-private let GC0     = CGPoint(x: 320, y: 90)   // Mochi center
+private let GC0     = CGPoint(x: 320, y: 90)   // Dew center
 private let GHB:    CGFloat = 58                // body height at full size
 private let GASP:   CGFloat = 1.34             // body width/height ratio
 private let GEAR_X: CGFloat = 40               // ear x from small island left edge (matches BotPlacement compact x=40)
@@ -241,193 +241,180 @@ private func gRR(_ ctx: CGContext, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h
     ctx.closePath()
 }
 
-private func mochiPath(hw: CGFloat, hh: CGFloat) -> CGPath {
-    let n: CGFloat = 3.2
-    let path = CGMutablePath()
-    let steps = 96
-    for i in 0...steps {
-        let a = CGFloat(i)/CGFloat(steps)*2 * .pi
-        let ca = cos(a), sa = sin(a)
-        let px = hw * (ca < 0 ? -1 : 1) * pow(abs(ca), 2/n)
-        let py = hh * (sa < 0 ? -1 : 1) * pow(abs(sa), 2/n)
-        if i == 0 { path.move(to: CGPoint(x: px, y: py)) }
-        else { path.addLine(to: CGPoint(x: px, y: py)) }
+// MARK: - Dew
+// The greeting draws Dew itself (its poses are scripted here), with the same glass, liquid
+// and light as everywhere else (DewBody.swift).
+
+/// Bulb radius. Beside the notch it matches the resting Dew; at full size it leaves room for the tip.
+private func dewR(_ p: GreetPose) -> CGFloat {
+    CGFloat(p.hb) * (0.588 - 0.07 * dewGrown(p))
+}
+
+/// 0 beside the notch, 1 at full size.
+private func dewGrown(_ p: GreetPose) -> CGFloat {
+    CGFloat(gClamp((p.hb - Double(GEAR_HB)) / Double(GHB - GEAR_HB), 0, 1))
+}
+
+/// Centre of the bulb. At full size it sits lower, so the drop (tip included) is centred in the card.
+private func dewCenter(_ p: GreetPose) -> CGPoint {
+    CGPoint(x: p.x, y: p.y + Double(dewR(p) * (0.06 + 0.24 * dewGrown(p))))
+}
+
+private func dewPose(_ p: GreetPose) -> DewPose {
+    DewPose(center: dewCenter(p), R: dewR(p), sx: p.sx, sy: p.sy, tilt: p.tilt, lean: -p.tilt * 3, morph: 0)
+}
+
+private func dewPath(_ p: GreetPose) -> Path {
+    let R = dewR(p)
+    return BotEngine.dropPath(rx: R * DewConst.rx, ry: R * DewConst.ry, R: R, lean: CGFloat(-p.tilt * 3))
+}
+
+/// What the greeting asks of the shared drawing code: blue liquid that rises at the end,
+/// stirred by the hop and the wave.
+@MainActor
+private func tune(_ dew: BotEngine, t: Double, p: GreetPose, glass: Bool) {
+    dew.col = (0.231, 0.620, 1)
+    dew.tint = CGFloat(p.tint)                   // clear at first; it fills at the end
+    dew.tilt = CGFloat(p.tilt)
+    dew.glassUnder = glass
+    dew.displayScale = 1
+    var slosh = 0.0, ripple = 0.0
+    if t >= GT.pop1 {
+        let w = t - GT.pop1
+        slosh = sin(w * 9) * 0.34 * exp(-w * 1.5)
+        ripple = exp(-w * 1.4)
     }
-    path.closeSubpath(); return path
+    if t >= GT.tint0 { ripple = max(ripple, exp(-(t - GT.tint0) * 2.2)) }
+    dew.slosh = CGFloat(slosh)
+    dew.ripple = CGFloat(ripple)
 }
 
-// Linear gradient fill clipped to path (body-local coords, centered at origin)
-private func whiteFill(_ ctx: CGContext, _ path: CGPath,
-                        x0: CGFloat, y0: CGFloat, x1: CGFloat, y1: CGFloat) {
-    let cs   = CGColorSpaceCreateDeviceRGB()
-    let c0   = CGColor(red: 251/255, green: 251/255, blue: 252/255, alpha: 1)
-    let c1   = CGColor(red: 231/255, green: 233/255, blue: 236/255, alpha: 1)
-    guard let g = CGGradient(colorsSpace: cs, colors: [c0,c1] as CFArray, locations: [0,1]) else { return }
-    ctx.saveGState()
-    ctx.addPath(path); ctx.clip()
-    ctx.drawLinearGradient(g, start: CGPoint(x: x0, y: y0), end: CGPoint(x: x1, y: y1), options: [])
-    ctx.restoreGState()
-}
-
-private func drawHandL(_ ctx: CGContext, hw: CGFloat, hh: CGFloat, p: GreetPose) {
-    let k = CGFloat(p.handL); guard k > 0.01 else { return }
-    let hb = hh*2, r = hb*0.15*k
-    let rx = gLerpF(-hw*0.35, -hw-hb*0.22, k)
-    let ry0 = gLerpF(hh*0.85, hh*0.62, k)
-    var ry = Double(ry0)
-    if p.wave >= 0 { ry += sin(p.wave*6)*Double(hb)*0.02 }
-    ctx.saveGState()
-    ctx.translateBy(x: rx, y: CGFloat(ry))
-    let circ = CGPath(ellipseIn: CGRect(x: -r, y: -r, width: r*2, height: r*2), transform: nil)
-    whiteFill(ctx, circ, x0: r, y0: -r, x1: -r, y1: r)
-    ctx.addEllipse(in: CGRect(x: -r, y: -r, width: r*2, height: r*2))
-    ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.08))
-    ctx.setLineWidth(0.8); ctx.strokePath()
-    ctx.restoreGState()
-}
-
-private func drawHandR(_ ctx: CGContext, hw: CGFloat, hh: CGFloat, p: GreetPose) {
-    let k = CGFloat(p.handR); guard k > 0.01 else { return }
-    let hb = hh*2, L = hb*0.40*k, T2 = hb*0.22*k
-    let rx0 = gLerpF(hw*0.35, hw+hb*0.20, k)
-    let ry0 = gLerpF(hh*0.85, hh*0.20, k)
-    var rx = Double(rx0), ry = Double(ry0), ang = -0.61
-    if p.wave >= 0 {
-        let w = p.wave*2 * .pi*2.5
-        ang += sin(w)*0.21; ry += sin(w+0.8)*Double(hb)*0.04; rx += cos(w)*Double(hb)*0.015
+private func drawHalo(_ ctx: CGContext, p: GreetPose) {
+    let R = dewR(p)
+    guard p.halo > 0, R > 0.4 else { return }
+    // Pale sky → blue, a soft aura in two passes. It is also what the glass has to bend.
+    let bl = CGFloat(p.haloBlue)
+    let cr = gLerpF(140/255, 59/255, bl)
+    let cg = gLerpF(205/255, 158/255, bl)
+    let cb = gLerpF(255/255, 255/255, bl)
+    let cs = CGColorSpaceCreateDeviceRGB()
+    let c = dewCenter(p)
+    let cx = c.x, cy = c.y - R * 0.35
+    for (radius, alpha) in [(R * 3.2, 0.24), (R * 5.2, 0.08)] {
+        let inner = CGColor(red: cr, green: cg, blue: cb, alpha: CGFloat(alpha * p.halo))
+        let outer = CGColor(red: cr, green: cg, blue: cb, alpha: 0)
+        guard let g = CGGradient(colorsSpace: cs, colors: [inner, outer] as CFArray, locations: [0, 1]) else { continue }
+        ctx.saveGState()
+        ctx.addEllipse(in: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2))
+        ctx.clip()
+        ctx.drawRadialGradient(g, startCenter: CGPoint(x: cx, y: cy), startRadius: 0,
+                               endCenter: CGPoint(x: cx, y: cy), endRadius: radius, options: [])
+        ctx.restoreGState()
     }
-    ctx.saveGState()
-    ctx.translateBy(x: CGFloat(rx), y: CGFloat(ry)); ctx.rotate(by: CGFloat(ang))
-    let cap = CGMutablePath()
-    gRR(ctx, -L/2, -T2/2, L, T2, T2/2)
-    cap.addPath(ctx.path!); ctx.beginPath()  // use current ctx path as clip path
-    whiteFill(ctx, cap, x0: L/2, y0: -T2/2, x1: -L/2, y1: T2/2)
-    gRR(ctx, -L/2, -T2/2, L, T2, T2/2)
-    ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.08))
-    ctx.setLineWidth(0.8); ctx.strokePath()
-    ctx.restoreGState()
 }
 
-private func drawMochi(_ ctx: CGContext, p: GreetPose) {
-    let hh = CGFloat(p.hb/2), hw = hh*GASP; guard hh > 0.4 else { return }
-
-    // Halo (golden → blue) — soft diffuse aura, two-pass for smoothness
-    if p.halo > 0 {
-        let bl = CGFloat(p.haloBlue)
-        let cr = gLerpF(232/255, 59/255, bl)
-        let cg = gLerpF(195/255, 158/255, bl)
-        let cb = gLerpF(154/255, 255/255, bl)
-        let cs = CGColorSpaceCreateDeviceRGB()
-        let cx = CGFloat(p.x), cy = CGFloat(p.y)
-        // Inner soft glow
-        let R1 = hw * 2.6
-        let ic1 = CGColor(red: cr, green: cg, blue: cb, alpha: CGFloat(0.18 * p.halo))
-        let oc1 = CGColor(red: cr, green: cg, blue: cb, alpha: 0)
-        if let g1 = CGGradient(colorsSpace: cs, colors: [ic1, oc1] as CFArray, locations: [0, 1]) {
-            ctx.saveGState()
-            ctx.addEllipse(in: CGRect(x: cx-R1, y: cy-R1, width: R1*2, height: R1*2))
-            ctx.clip()
-            ctx.drawRadialGradient(g1, startCenter: CGPoint(x: cx, y: cy), startRadius: 0,
-                                   endCenter: CGPoint(x: cx, y: cy), endRadius: R1, options: [])
-            ctx.restoreGState()
-        }
-        // Outer wide aura
-        let R2 = hw * 4.2
-        let ic2 = CGColor(red: cr, green: cg, blue: cb, alpha: CGFloat(0.07 * p.halo))
-        let oc2 = CGColor(red: cr, green: cg, blue: cb, alpha: 0)
-        if let g2 = CGGradient(colorsSpace: cs, colors: [ic2, oc2] as CFArray, locations: [0, 1]) {
-            ctx.saveGState()
-            ctx.addEllipse(in: CGRect(x: cx-R2, y: cy-R2, width: R2*2, height: R2*2))
-            ctx.clip()
-            ctx.drawRadialGradient(g2, startCenter: CGPoint(x: cx, y: cy), startRadius: 0,
-                                   endCenter: CGPoint(x: cx, y: cy), endRadius: R2, options: [])
-            ctx.restoreGState()
-        }
-    }
-
-    ctx.saveGState()
-    ctx.translateBy(x: CGFloat(p.x), y: CGFloat(p.y))
-    ctx.rotate(by: CGFloat(p.tilt))
+/// Dew's own space: origin on the bulb's centre.
+private func dewContext(_ context: GraphicsContext, p: GreetPose) -> GraphicsContext {
+    let c = dewCenter(p)
+    var ctx = context
+    ctx.translateBy(x: c.x, y: c.y)
+    ctx.rotate(by: .radians(p.tilt))
     ctx.scaleBy(x: CGFloat(p.sx), y: CGFloat(p.sy))
+    return ctx
+}
 
-    // Hands behind body
-    drawHandL(ctx, hw: hw, hh: hh, p: p)
-    drawHandR(ctx, hw: hw, hh: hh, p: p)
+/// Behind the glass: the hands and the liquid.
+@MainActor
+private func drawDewUnder(_ context: GraphicsContext, p: GreetPose, dew: BotEngine) {
+    let R = dewR(p); guard R > 0.4 else { return }
+    let rx = R * DewConst.rx, ry = R * DewConst.ry, hb = ry * 2
+    let ctx = dewContext(context, p: p)
 
-    // Body
-    let mpath = mochiPath(hw: hw, hh: hh)
-    whiteFill(ctx, mpath, x0: hw*0.6, y0: -hh, x1: -hw*0.6, y1: hh)
-
-    // Blue tint overlay
-    if p.tint > 0 {
-        let cs = CGColorSpaceCreateDeviceRGB()
-        let c0 = CGColor(red: 127/255, green: 180/255, blue: 234/255, alpha: CGFloat(p.tint))
-        let c1 = CGColor(red: 127/255, green: 180/255, blue: 234/255, alpha: 0)
-        if let g = CGGradient(colorsSpace: cs, colors: [c0,c1] as CFArray, locations: [0,1]) {
-            ctx.saveGState()
-            ctx.addPath(mpath); ctx.clip()
-            ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: hh), end: CGPoint(x: 0, y: -hh*0.1), options: [])
-            ctx.restoreGState()
+    // Left hand: a bead resting at the side
+    let kl = CGFloat(p.handL)
+    if kl > 0.01 {
+        let r = hb * 0.15 * kl
+        let hx = gLerpF(-rx * 0.35, -rx - hb * 0.20, kl)
+        var hy = gLerpF(ry * 0.85, ry * 0.62, kl)
+        if p.wave >= 0 { hy += CGFloat(sin(p.wave * 6)) * hb * 0.02 }
+        dew.drawBead(ctx, in: CGRect(x: hx - r, y: hy - r, width: r * 2, height: r * 2))
+    }
+    // Right hand: raised, and waving
+    let kr = CGFloat(p.handR)
+    if kr > 0.01 {
+        let L = hb * 0.40 * kr, T = hb * 0.24 * kr
+        var hx = gLerpF(rx * 0.35, rx + hb * 0.20, kr)
+        var hy = gLerpF(ry * 0.85, ry * 0.20, kr)
+        var ang = -0.61
+        if p.wave >= 0 {
+            let w = p.wave * 2 * .pi * 2.5
+            ang += sin(w) * 0.21; hy += CGFloat(sin(w + 0.8)) * hb * 0.04; hx += CGFloat(cos(w)) * hb * 0.015
         }
+        var hand = ctx
+        hand.translateBy(x: hx, y: hy)
+        hand.rotate(by: .radians(ang))
+        dew.drawBead(hand, in: CGRect(x: -L / 2, y: -T / 2, width: L, height: T))
     }
 
-    // Eyes (clipped to body)
-    ctx.saveGState()
-    ctx.addPath(mpath); ctx.clip()
-    ctx.setFillColor(gHex("#16171A"))
-    ctx.setStrokeColor(gHex("#16171A"))
-    let er = CGFloat(p.hb*0.06)
-    let sp = CGFloat(p.hb*0.19)
-    let lx = CGFloat(p.lookX)*hw*0.42
-    let ly = CGFloat(p.lookY)*hh*0.28 + hh*0.12 + CGFloat(p.eyeRoll)*hh*1.25
+    dew.drawLiquid(ctx: ctx, path: dewPath(p), R: R, rx: rx, ry: ry)
+}
+
+/// In front of the glass: its light, the eyes and the badge.
+@MainActor
+private func drawDewOver(_ context: GraphicsContext, p: GreetPose, dew: BotEngine) {
+    let R = dewR(p); guard R > 0.4 else { return }
+    let rx = R * DewConst.rx, ry = R * DewConst.ry
+    let ctx = dewContext(context, p: p)
+    let path = dewPath(p)
+    dew.drawDewBody(ctx: ctx, path: path, R: R, rx: rx, ry: ry)
+
+    // Eyes (clipped to the body, so they can roll out of sight when Dew ducks)
+    var eyes = ctx
+    eyes.clip(to: path)
+    eyes.addFilter(.shadow(color: .black.opacity(0.38), radius: R * 0.05, x: 0, y: R * 0.02))
+    let ink = Color(cgColor: DewConst.ink)
+    let ew = R * DewConst.eyeW, eh = R * DewConst.eyeH
+    let sp = sin(DewConst.eyeSp) * rx
+    let lx = CGFloat(p.lookX) * R * 0.34
+    let ly = CGFloat(p.lookY) * ry * 0.24 + ry * 0.13 + CGFloat(p.eyeRoll) * ry * 1.25
+    let stroke = StrokeStyle(lineWidth: ew * 0.52, lineCap: .round)
     for sd: CGFloat in [-1, 1] {
-        ctx.saveGState()
-        ctx.translateBy(x: sd*sp+lx, y: ly)
-        if p.eye == .happy {
-            ctx.setLineWidth(er*0.95)
-            ctx.setLineCap(.round)
-            ctx.beginPath()
-            ctx.addArc(center: CGPoint(x: 0, y: er*0.6), radius: er*1.25,
-                       startAngle: .pi*1.15, endAngle: .pi*1.85, clockwise: false)
-            ctx.strokePath()
-        } else if p.eye == .content {
-            ctx.setLineWidth(er*0.95)
-            ctx.setLineCap(.round)
-            ctx.beginPath()
-            ctx.addArc(center: CGPoint(x: 0, y: -er*0.5), radius: er*1.25,
-                       startAngle: .pi*0.15, endAngle: .pi*0.85, clockwise: false)
-            ctx.strokePath()
-        } else {
-            ctx.scaleBy(x: 1, y: max(0.12, CGFloat(p.open)))
-            ctx.addEllipse(in: CGRect(x: -er, y: -er, width: er*2, height: er*2))
-            ctx.fillPath()
+        var eye = eyes
+        eye.translateBy(x: sd * sp + lx, y: ly)
+        switch p.eye {
+        case .happy:
+            var arc = Path()
+            arc.addArc(center: CGPoint(x: 0, y: ew * 0.45), radius: ew * 0.80,
+                       startAngle: .radians(.pi * 1.15), endAngle: .radians(.pi * 1.85), clockwise: false)
+            eye.stroke(arc, with: .color(ink), style: stroke)
+        case .content:
+            var arc = Path()
+            arc.addArc(center: CGPoint(x: 0, y: -ew * 0.40), radius: ew * 0.80,
+                       startAngle: .radians(.pi * 0.15), endAngle: .radians(.pi * 0.85), clockwise: false)
+            eye.stroke(arc, with: .color(ink), style: stroke)
+        case .dot:
+            let h = max(eh * CGFloat(p.open), ew * 0.3)
+            let r = min(ew, h) / 2
+            eye.fill(Path(roundedRect: CGRect(x: -ew / 2, y: -h / 2, width: ew, height: h),
+                          cornerSize: CGSize(width: r, height: r)), with: .color(ink))
         }
-        ctx.restoreGState()
     }
-    ctx.restoreGState()
 
-    // Activity badge (top-left corner)
+    // Activity badge on the shoulder
     if p.badge > 0.01 {
-        let bs = CGFloat(p.badge)
-        let br = hh*0.3
-        ctx.saveGState()
-        ctx.translateBy(x: -hw*0.78, y: -hh*0.72)
-        ctx.scaleBy(x: bs, y: bs)
-        ctx.setFillColor(gHex("#000000"))
-        ctx.addEllipse(in: CGRect(x: -(br+hh*0.07), y: -(br+hh*0.07),
-                                  width: (br+hh*0.07)*2, height: (br+hh*0.07)*2))
-        ctx.fillPath()
-        ctx.setFillColor(gHex("#3BA0F5"))
-        ctx.addEllipse(in: CGRect(x: -br, y: -br, width: br*2, height: br*2)); ctx.fillPath()
-        ctx.setFillColor(gHex("#0B1B3A"))
+        var badge = ctx
+        badge.translateBy(x: -R * 0.72, y: -R * 0.72)
+        badge.scaleBy(x: CGFloat(p.badge), y: CGFloat(p.badge))
+        let pw = R * 0.72, ph = R * 0.36
+        badge.fill(Path(roundedRect: CGRect(x: -pw / 2, y: -ph / 2, width: pw, height: ph),
+                        cornerSize: CGSize(width: ph / 2, height: ph / 2)),
+                   with: .color(Color(hex: "#3B9EFF")))
         for i: CGFloat in [-1, 0, 1] {
-            ctx.addEllipse(in: CGRect(x: i*br*0.5-br*0.17, y: -br*0.17, width: br*0.34, height: br*0.34))
-            ctx.fillPath()
+            let d = R * 0.055
+            badge.fill(Path(ellipseIn: CGRect(x: i * R * 0.18 - d, y: -d, width: d * 2, height: d * 2)),
+                       with: .color(.white))
         }
-        ctx.restoreGState()
     }
-
-    ctx.restoreGState()
 }
 
 private func drawParticles(_ ctx: CGContext, t: Double, tc: Double, p: GreetPose) {
@@ -502,15 +489,15 @@ private func drawMinis(_ ctx: CGContext, alpha: Double, compact: IslandRestingLa
         let scale = CGFloat(alpha) * compact.miniGridScale
         ctx.scaleBy(x: scale, y: scale)
         ctx.setFillColor(gHex(miniColors[i]))
-        ctx.addPath(mochiPath(hw: 5.3, hh: 4)); ctx.fillPath()
+        ctx.addPath(BotEngine.dropPath(rx: 4.4, ry: 4.4 * DewConst.ry, R: 4.4).cgPath); ctx.fillPath()
         ctx.restoreGState()
     }
 }
 
 // MARK: - Full draw function
 
-private func drawGreeting(_ ctx: CGContext, size: CGSize, t: Double, tc: Double, compact: IslandRestingLayout) {
-    let p = pose(t, tc: tc, compact: compact)
+/// Everything but Dew: the card, the particles, the pills' characters and Dew's halo.
+private func drawGreeting(_ ctx: CGContext, size: CGSize, t: Double, tc: Double, p: GreetPose, compact: IslandRestingLayout) {
 
     // Card background (dark panel)
     if p.card > 0 {
@@ -535,7 +522,7 @@ private func drawGreeting(_ ctx: CGContext, size: CGSize, t: Double, tc: Double,
 
     // drawHeader: no icons during greeting
     drawMinis(ctx, alpha: p.minis, compact: compact)
-    drawMochi(ctx, p: p)
+    drawHalo(ctx, p: p)
 }
 
 // MARK: - SwiftUI View
@@ -546,6 +533,12 @@ struct GreetingCanvasView: View {
     @State private var startDate = Date()
     @State private var tc: Double = .infinity   // collapses only when FSM fires .greetingInterrupt
     @State private var greetFired = false
+    @StateObject private var dew = BotEngine()   // only for its drawing code and the liquid's state
+
+    private var glass: Bool {
+        if #available(macOS 26.0, *) { return !DewDebug.noGlass }
+        return false
+    }
 
     // Scheduled works (cancellable)
     @State private var soundWork1: DispatchWorkItem? = nil
@@ -555,11 +548,22 @@ struct GreetingCanvasView: View {
     var body: some View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSince(startDate)
-            Canvas { context, size in
-                context.withCGContext { cgCtx in
-                    drawGreeting(cgCtx, size: size, t: t, tc: tc,
-                                 compact: IslandRestingLayout(width: state.notchWidth + 160,
-                                                              height: state.notchHeight))
+            let compact = IslandRestingLayout(width: state.notchWidth + 160, height: state.notchHeight)
+            let p = pose(t, tc: tc, compact: compact)
+            let _ = tune(dew, t: t, p: p, glass: glass)
+            // Dew's body is real glass between two canvases, like in the open island
+            ZStack {
+                Canvas { context, size in
+                    context.withCGContext { cgCtx in
+                        drawGreeting(cgCtx, size: size, t: t, tc: tc, p: p, compact: compact)
+                    }
+                    drawDewUnder(context, p: p, dew: dew)
+                }
+                if #available(macOS 26.0, *), glass {
+                    DewGlass(pose: dewPose(p))
+                }
+                Canvas { context, size in
+                    drawDewOver(context, p: p, dew: dew)
                 }
             }
             // Fire greetComplete exactly once at T.end (when no hover)

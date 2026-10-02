@@ -85,8 +85,11 @@ final class ClaudeHub {
 
     // MARK: - Sessions
 
+    /// Development only: keeps sample sessions in place of the real ones.
+    var frozen = false
+
     func refreshSessions() {
-        guard !scanning else { return }
+        guard !scanning, !frozen else { return }
         scanning = true
         Self.queue.async {
             let sessions = Self.scanSessions()
