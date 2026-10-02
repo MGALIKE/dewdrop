@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Mochi's canvas. It is redrawn only while something on Mochi changes: a `Heartbeat` asks the
 /// engine a few times a second whether anything is due, and the timeline runs until it settles.
@@ -35,32 +36,41 @@ struct BotCanvasView: View {
     }
 
     var body: some View {
-        // What Mochi may spend. While something moves: 60 fps with the pointer on the island,
-        // 30 in the open island, 20 for the tiny Mochi in the folded notch. While nothing moves:
-        // no frames at all, or a trickle for a ticking badge in the open island.
-        // (At the display's 120 Hz the island had no time left for its own animations.)
+        // What Dew may spend. While something moves: 30 fps in the open island (the same beat as
+        // the pill characters and the text shimmer, so one redraw serves them all), 20 for the
+        // tiny Dew in the folded notch. While nothing moves: no frames at all, or a trickle for a
+        // ticking badge in the open island.
+        // (Every redraw of the island costs about 4 ms whatever changed: at 60 fps with the
+        // pointer on it the island took a quarter of a core, at 30 it takes half that.)
         let folded = state.mode != .expanded
         let running = awake || dances
-        let rate: Double = running ? (motion.lively ? 60 : folded ? 20 : 30) : 6
-        TimelineView(.beat(rate, paused: state.mode == .hidden || !(running || simmers))) { timeline in
-            Canvas { context, size in
-                _ = timeline.date            // redraw on every tick
-                feed()
-                engine.advance(stepsPerSecond: 60)
-                let now = CACurrentMediaTime()
-                if engine.isAnimating { engine.lastMotion = now }
-                #if DEBUG
-                FrameLog.hit(awake ? "mochi(" + engine.animatingReason + ")" : "mochi-trickle")
-                #endif
-                let settled = now - engine.lastMotion > 0.1
-                if settled == awake { DispatchQueue.main.async { awake = !settled } }
-                engine.drawHandsBehind(context: context, size: size)
-                engine.draw(context: context, size: size)
-                engine.drawProps(context: context, size: size)
-                engine.drawHandsAndExtras(context: context, size: size)
+        let rate: Double = running ? (folded ? 20 : 30) : 6
+        Beat(rate, paused: state.mode == .hidden || !(running || simmers)) { timeline in
+            let _ = step(timeline.date)
+            ZStack {
+                // In the open island the body is real glass; the canvas draws the light in it
+                if #available(macOS 26.0, *), glass {
+                    // Under the glass: what it bends (the liquid inside, the hands behind)
+                    Canvas { context, size in
+                        _ = timeline.date
+                        engine.drawHandsBehind(context: context, size: size)
+                        engine.drawUnderGlass(context: context, size: size)
+                    }
+                    GeometryReader { geo in DewGlass(pose: engine.pose(in: geo.size)) }
+                }
+                Canvas { context, size in
+                    _ = timeline.date            // redraw on every tick
+                    if !engine.glassUnder { engine.drawHandsBehind(context: context, size: size) }
+                    engine.draw(context: context, size: size)
+                    engine.drawProps(context: context, size: size)
+                    engine.drawHandsAndExtras(context: context, size: size)
+                }
             }
         }
         .onReceive(Heartbeat.shared) { _ in
+            #if DEBUG
+            FrameLog.hit("heartbeat")
+            #endif
             guard !awake, state.mode != .hidden else { return }
             feed()
             if engine.wantsWake(lookX: engine.lookX, lookY: engine.lookY) { wake() }
@@ -141,6 +151,26 @@ struct BotCanvasView: View {
         }
     }
 
+    /// Real glass under the canvas: only where Dew is large enough for it to show.
+    private var glass: Bool {
+        state.mode == .expanded && state.view != .uploading && !DewDebug.noGlass
+    }
+
+    /// One tick: hand the engine its inputs, move it forward and note whether it has settled.
+    private func step(_ date: Date) {
+        guard date != engine.lastTick else { return }
+        engine.lastTick = date
+        feed()
+        engine.advance(stepsPerSecond: 60)
+        let now = CACurrentMediaTime()
+        if engine.isAnimating { engine.lastMotion = now }
+        #if DEBUG
+        FrameLog.hit(awake ? "mochi(" + engine.animatingReason + ")" : "mochi-trickle")
+        #endif
+        let settled = now - engine.lastMotion > 0.1
+        if settled == awake { DispatchQueue.main.async { awake = !settled } }
+    }
+
     /// Start redrawing: something just changed.
     private func wake() {
         #if DEBUG
@@ -159,6 +189,7 @@ struct BotCanvasView: View {
         engine.lookY = follows ? lookY(state: state) : 0
         engine.particleOverhang = particleOverhang
         engine.displayScale = displayScale
+        if #available(macOS 26.0, *) { engine.glassUnder = glass } else { engine.glassUnder = false }
         // Widen slot when file is hovering over the mailbox (morph > 0.5)
         // Open mouth (hover=0.20R) when file dragged over box; close when not
         if engine.morph > 0.3 {
@@ -239,7 +270,7 @@ struct MiniBotCanvasView: View {
         // keeps a trickle of frames for its pulsing badge. They also wait for the island to
         // finish opening.
         let simmers = !folded && task.state != .idle
-        TimelineView(.beat(motion.lively ? 30 : 4, paused: motion.opening || !(motion.lively || simmers))) { timeline in
+        Beat(motion.lively ? 15 : 4, paused: motion.opening || !(motion.lively || simmers)) { timeline in
             Canvas { context, size in
                 _ = timeline.date            // redraw on every tick
                 engine.mood = AppState.shared.miniMood(for: task.id)
@@ -269,10 +300,27 @@ struct MiniBotCanvasView: View {
     }
 }
 
-/// One slow shared tick. The sleeping canvas uses it to ask its engine whether anything is due.
+/// One slow shared tick. The sleeping canvas uses it to ask its engine whether anything is due
+/// (a blink, a glance at the pointer). Five a second while the pointer is moving or the island is
+/// open; one a second, loosely timed, while nobody is touching the Mac.
 @MainActor
 enum Heartbeat {
-    static let shared = Timer.publish(every: 0.2, tolerance: 0.1, on: .main, in: .common).autoconnect()
+    static let shared = PassthroughSubject<Date, Never>()
+    private static var timer: Timer?
+    private static var interval: Double = 0
+
+    static func setRelaxed(_ relaxed: Bool) {
+        let wanted = relaxed ? 1.0 : 0.2
+        guard wanted != interval else { return }
+        interval = wanted
+        timer?.invalidate()
+        let t = Timer(timeInterval: wanted, repeats: true) { _ in
+            MainActor.assumeIsolated { shared.send(Date()) }
+        }
+        t.tolerance = wanted / 2
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
 }
 
 // MARK: - CGColor from hex string
@@ -290,4 +338,9 @@ extension CGColor {
     static func from(_ hex: String) -> CGColor {
         cgColorFromHex(hex) ?? CGColor(gray: 0.5, alpha: 1)
     }
+}
+
+/// `-debugDewGlass 0` draws Dew without the real glass underneath, to compare.
+enum DewDebug {
+    static let noGlass = UserDefaults.standard.string(forKey: "debugDewGlass") == "0"
 }

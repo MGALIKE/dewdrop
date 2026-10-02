@@ -320,7 +320,7 @@ private struct Scrubber: View {
     @State private var dragFraction: Double? = nil
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { timeline in
+        Beat(2) { timeline in
             let live = np.duration > 0 ? np.position(at: timeline.date) / np.duration : 0
             let fraction = dragFraction ?? live
             let shown = fraction * np.duration
@@ -397,7 +397,7 @@ struct MarqueeText: View {
             .overlay(alignment: .leading) {
                 // Glides while someone is pointing at the island, and in a banner (which is
                 // only up for a few seconds); otherwise the title rests at its start.
-                TimelineView(.beat(30, paused: overflow <= 0 || !(motion.lively || AppState.shared.view == .toast))) { timeline in
+                Beat(30, paused: overflow <= 0 || !(motion.lively || AppState.shared.view == .toast)) { timeline in
                     Text(text)
                         .font(font)
                         .foregroundColor(color)
@@ -658,7 +658,7 @@ struct TimerCardView: View {
     // MARK: Running
 
     private func running(_ c: Countdown) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        Beat(1) { timeline in
             let now = timeline.date
             let left = c.remaining(at: now)
             VStack(alignment: .leading, spacing: 0) {
@@ -806,7 +806,7 @@ struct CompactTimerView: View {
     let countdown: Countdown
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        Beat(1) { timeline in
             HStack(spacing: 4) {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.14), lineWidth: 2)

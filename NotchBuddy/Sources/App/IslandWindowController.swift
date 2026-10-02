@@ -19,6 +19,9 @@ final class IslandWindowController: NSWindowController {
     private var frameTimer: Timer?
     private var keyMonitor: Any?
     private var clickAwayMonitor: Any?
+    private var modeSubscription: AnyCancellable?
+    private var hotkeySubscription: AnyCancellable?
+    private var hotkeyMonitor: Any?
 
     // Dynamic-Island toast
     private var toastTimer: DispatchWorkItem?
@@ -103,7 +106,7 @@ final class IslandWindowController: NSWindowController {
         let container = NSView(frame: NSRect(origin: .zero, size: contentSize))
         container.autoresizingMask = [.width, .height]
 
-        let hosting = NSHostingView(rootView: IslandRootView().environmentObject(AppState.shared))
+        let hosting = IslandHostingView(rootView: IslandRootView().environmentObject(AppState.shared))
         hosting.frame = NSRect(origin: .zero, size: contentSize)
         hosting.autoresizingMask = [.width, .height]
 
@@ -148,7 +151,7 @@ final class IslandWindowController: NSWindowController {
 
         startPolling()
         startKeyMonitor()
-        startClickAwayMonitor()
+        watchWhileOpen()
         wireFSM()
 
         // Make panel key whenever the prompt/chat view becomes active
@@ -209,12 +212,22 @@ final class IslandWindowController: NSWindowController {
     }
 
     // MARK: - Pointer polling
-    // 60 Hz while the pointer is near the island or the island is open; a relaxed 20 Hz the rest
-    // of the time, so the Mac is not woken 60 times a second for a pointer nowhere near the notch.
+    // 60 Hz while the pointer moves near the island or over the open island, 20 Hz while it moves
+    // elsewhere, 10 Hz over an open island once it has come to rest. A pointer that has not moved
+    // for two seconds is hardly polled at all: a mouse-moved monitor (which costs nothing until
+    // the mouse moves) starts the polling again at the first movement, and one look a second
+    // remains as a safety net. A Mac nobody is touching is then barely woken by the island.
 
     private var pollRate: Double = 0
+    private var lastPolledMouse: CGPoint = .zero
+    private var pointerStillSince = CACurrentMediaTime()
+    private var moveMonitor: Any?
+    private var pollingAsleep = false
 
-    private func startPolling() { setPollRate(60) }
+    private func startPolling() {
+        setPollRate(60)
+        Heartbeat.setRelaxed(false)
+    }
 
     private func setPollRate(_ rate: Double) {
         guard rate != pollRate else { return }
@@ -224,15 +237,58 @@ final class IslandWindowController: NSWindowController {
             guard let self else { return }
             Task { @MainActor in self.pollFrame() }
         }
-        timer.tolerance = rate < 60 ? 0.015 : 0
+        timer.tolerance = rate >= 60 ? 0 : rate >= 10 ? 0.015 : 0.3 / rate
         RunLoop.main.add(timer, forMode: .common)
         frameTimer = timer
+    }
+
+    /// Stops watching the pointer closely until it moves again.
+    private func sleepPolling() {
+        guard !pollingAsleep else { return }
+        pollingAsleep = true
+        #if DEBUG
+        FrameLog.hit("poll-sleep")
+        #endif
+        Heartbeat.setRelaxed(true)
+        // A global monitor does not see movement while this app is the active one (right after
+        // it was launched by hand, or with its settings window in front): look more often then.
+        setPollRate(NSApp.isActive ? 4 : 1)
+        moveMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        ) { [weak self] _ in
+            Task { @MainActor in self?.wakePolling() }
+        }
+    }
+
+    /// Watches the pointer again: it moved, or the island changed under it.
+    func wakePolling() {
+        pointerStillSince = CACurrentMediaTime()
+        if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
+        moveMonitor = nil
+        guard pollingAsleep else { return }
+        pollingAsleep = false
+        Heartbeat.setRelaxed(false)
+        setPollRate(20)
+        pollFrame()
     }
 
     private func pollFrame() {
         guard let panel = window as? IslandPanel else { return }
 
+        #if DEBUG
+        FrameLog.hit("poll")
+        #endif
         let mouse = NSEvent.mouseLocation
+        let now = CACurrentMediaTime()
+        if mouse != lastPolledMouse {
+            lastPolledMouse = mouse
+            pointerStillSince = now
+        }
+        let still = now - pointerStillSince
+        if pollingAsleep {
+            if still == 0 { wakePolling() }   // the safety net saw it move
+            return
+        }
 
         // Convert mouse to panel-local coords (macOS: origin bottom-left)
         let pf = panel.frame
@@ -248,7 +304,8 @@ final class IslandWindowController: NSWindowController {
 
         let near = islandRect.insetBy(dx: -240, dy: -240).contains(local)
         IslandMotion.shared.pointerNear = near
-        setPollRate(state.mode == .expanded || near || inAttachDrag || attachDragStart != nil ? 60 : 20)
+        let dragging = inAttachDrag || attachDragStart != nil
+        setPollRate(dragging ? 60 : state.mode == .expanded || near ? (still > 1 ? 10 : 60) : 20)
 
         // Toggle click-through
         let shouldAcceptMouse = inIsland || inAttachDrag || attachDragStart != nil
@@ -271,6 +328,9 @@ final class IslandWindowController: NSWindowController {
         if state.mode == .hidden && fsm.state == .petit { fsm.hiddenExternally() }
 
         if inIsland != wasInIsland { IslandMotion.shared.pointer(onIsland: inIsland) }
+        // A pointer parked on the island is not someone playing with it: the ambient animations
+        // settle after a few seconds and pick up again when it moves.
+        IslandMotion.shared.pointer(resting: inIsland && still > 5)
 
         // Feed FSM hover enter/leave
         if inIsland && !wasInIsland {
@@ -305,6 +365,11 @@ final class IslandWindowController: NSWindowController {
         if inAttachDrag {
             updateDragGhost()
             updateWindowHighlight()
+        }
+
+        // Nothing left to watch: the island is folded and the pointer has stopped somewhere else
+        if still > 2, state.mode != .expanded, !inIsland, !dragging {
+            sleepPolling()
         }
     }
 
@@ -362,6 +427,7 @@ final class IslandWindowController: NSWindowController {
             : .spring(response: 0.5, dampingFraction: 0.72)
         if mode == .expanded { IslandMotion.shared.islandWillOpen() }
         withAnimation(anim) { state.mode = mode }
+        wakePolling()   // the island's outline changed under the pointer
         if mode == .expanded && !quietTransition { SoundEngine.shared.play("open") }
         if prev == .expanded {
             if !quietTransition { SoundEngine.shared.play("close") }
@@ -442,7 +508,10 @@ final class IslandWindowController: NSWindowController {
 
     /// Clicking anywhere outside the island folds it right away (no waiting for the hover timer).
     /// Global monitors only see events aimed at other apps, so clicks inside the island never land here.
+    /// Only installed while the island is open (see `watchWhileOpen`): folded, there is nothing to
+    /// fold, and the app would be woken by every click made anywhere.
     private func startClickAwayMonitor() {
+        guard clickAwayMonitor == nil else { return }
         clickAwayMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state.mode == .expanded, !self.state.isPinned,
@@ -452,18 +521,41 @@ final class IslandWindowController: NSWindowController {
         }
     }
 
-    private func startKeyMonitor() {
+    /// Escape closes the open island. Like the click-away monitor, it only listens while there
+    /// is something to close, rather than waking the app for every key typed anywhere.
+    private func startEscapeMonitor() {
+        guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return } // Escape
             Task { @MainActor in
                 guard let self = self else { return }
-                if event.keyCode == 53 { // Escape
-                    if self.state.mode == .expanded && !self.state.isPinned {
-                        self.collapse()
-                    }
+                if self.state.mode == .expanded && !self.state.isPinned {
+                    self.collapse()
                 }
             }
         }
+    }
 
+    /// Starts the monitors that only matter while the island is open, and removes them when it folds.
+    private func watchWhileOpen() {
+        modeSubscription = state.$mode.removeDuplicates().sink { [weak self] mode in
+            guard let self else { return }
+            if mode == .expanded {
+                self.startEscapeMonitor()
+                self.startClickAwayMonitor()
+            } else {
+                if let m = self.keyMonitor { NSEvent.removeMonitor(m) }
+                if let m = self.clickAwayMonitor { NSEvent.removeMonitor(m) }
+                self.keyMonitor = nil
+                self.clickAwayMonitor = nil
+            }
+            // The island's outline is about to change under the pointer
+            DispatchQueue.main.async { self.wakePolling() }
+        }
+    }
+
+    /// Wires the island to what the rest of the app asks of it (and the show-island shortcut).
+    private func startKeyMonitor() {
         // Hook server expand requests (alerts only)
         NotificationCenter.default.addObserver(forName: .hookExpand, object: nil, queue: .main) { [weak self] note in
             guard let self, let view = note.object as? IslandView else { return }
@@ -565,13 +657,22 @@ final class IslandWindowController: NSWindowController {
         }
 
         // Global hotkey to show island
-        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            Task { @MainActor in
-                guard let self, self.state.hotkeyEnabled else { return }
+        // (Listens only while the shortcut is switched on: otherwise every key typed anywhere
+        // would wake the app for nothing.)
+        hotkeySubscription = state.$hotkeyEnabled.removeDuplicates().sink { [weak self] enabled in
+            guard let self else { return }
+            if let m = self.hotkeyMonitor { NSEvent.removeMonitor(m) }
+            self.hotkeyMonitor = nil
+            guard enabled else { return }
+            self.hotkeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let keyCode = event.keyCode
                 let pressed = event.modifierFlags.intersection([.command, .control, .option, .shift]).rawValue
-                guard pressed == self.state.hotkeyFlags, event.keyCode == self.state.hotkeyCode else { return }
-                if self.state.mode == .hidden || self.state.mode == .compact {
-                    self.expand(to: .overview)
+                Task { @MainActor in
+                    guard let self, self.state.hotkeyEnabled else { return }
+                    guard pressed == self.state.hotkeyFlags, keyCode == self.state.hotkeyCode else { return }
+                    if self.state.mode == .hidden || self.state.mode == .compact {
+                        self.expand(to: .overview)
+                    }
                 }
             }
         }
@@ -976,3 +1077,18 @@ func islandSize(mode: IslandMode, view: IslandView,
         return (layout.width ?? IslandConst.expandedWidth, layout.height)
     }
 }
+
+#if DEBUG
+/// The island's hosting view. In development it counts its render passes for the frame log:
+/// every pass costs a few milliseconds whatever changed, so their number is what the island costs.
+final class IslandHostingView<Content: View>: NSHostingView<Content> {
+    required init(rootView: Content) { super.init(rootView: rootView) }
+    @MainActor @preconcurrency required dynamic init?(coder: NSCoder) { fatalError("not used") }
+    override func layout() {
+        FrameLog.hit("pass")
+        super.layout()
+    }
+}
+#else
+typealias IslandHostingView = NSHostingView
+#endif

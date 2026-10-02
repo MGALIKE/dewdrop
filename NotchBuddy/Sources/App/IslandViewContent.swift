@@ -2304,7 +2304,7 @@ struct TickerShimmerText: View {
             .overlay {
                 if motion.lively {
                     GeometryReader { geo in
-                        TimelineView(.beat(30)) { tl in
+                        Beat(30) { tl in
                             let t = tl.date.timeIntervalSinceReferenceDate
                             let p = CGFloat(t.truncatingRemainder(dividingBy: 2.2) / 2.2)
                             // sweeps -0.1 → 1.1 so the light enters from the left and exits right

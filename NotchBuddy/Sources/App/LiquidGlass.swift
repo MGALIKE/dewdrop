@@ -252,7 +252,7 @@ struct FlowingMesh: View {
         // The colours drift slowly behind frosted glass, so 15 frames a second look the same as
         // 60. They drift while the pointer is on the island and for a moment after it opens, and
         // hold still otherwise (and during the opening itself, so the spring gets every frame).
-        TimelineView(.beat(15, paused: motion.opening || !motion.lively)) { timeline in
+        Beat(15, paused: motion.opening || !motion.lively) { timeline in
             MeshGradient(width: 3, height: 3,
                          points: Self.points(motion.flowTime(at: timeline.date) * (calm ? 0.35 : 1)),
                          colors: colors, smoothsColors: true)
@@ -293,6 +293,7 @@ final class IslandMotion: ObservableObject {
     private var openToken = 0
     private var boostToken = 0
     private var hovering = false
+    private var resting = false
     private var boosted = false
 
     func islandWillOpen() {
@@ -311,6 +312,13 @@ final class IslandMotion: ObservableObject {
         refresh()
     }
 
+    /// The pointer is on the island but has not moved for a few seconds.
+    func pointer(resting: Bool) {
+        guard resting != self.resting else { return }
+        self.resting = resting
+        refresh()
+    }
+
     /// Full frame rate for a moment: Mochi is reacting to something.
     func boost(_ seconds: Double = 2.5) {
         boostToken += 1
@@ -325,7 +333,7 @@ final class IslandMotion: ObservableObject {
     }
 
     private func refresh() {
-        let now = hovering || boosted
+        let now = (hovering && !resting) || boosted
         guard lively != now else { return }
         // The colour flow only moves while lively; keep its clock from jumping when it resumes
         let t = Date().timeIntervalSinceReferenceDate
@@ -342,33 +350,95 @@ final class IslandMotion: ObservableObject {
     }
 }
 
-/// A timeline that ticks on one shared grid of clock time instead of counting from the moment
-/// each view appeared. Every ambient animation uses it with a rate that divides 60 (60, 30, 20,
-/// 15, 10), so their ticks fall in the same frames and the island is redrawn once for all of them
-/// rather than once for each.
-struct BeatSchedule: TimelineSchedule {
-    var interval: Double
-    var paused = false
+/// Redraws its content a few times a second, on one shared grid of clock time rather than
+/// counting from the moment each view appeared. Every ambient animation uses it with a rate that
+/// divides 60 (60, 30, 20, 15, 10…), so their ticks fall together and the island is redrawn once
+/// for all of them rather than once for each.
+///
+/// It is a plain timer, not a `TimelineView`: while a timeline has an entry coming, SwiftUI keeps
+/// the window's display link running and makes a render pass on every screen refresh (120 a
+/// second) between the entries, so a badge ticking six times a second cost as much as a
+/// full-rate animation. With a timer the island is redrawn on the ticks and not in between.
+struct Beat<Content: View>: View {
+    private let interval: Double
+    private let paused: Bool
+    private let content: (BeatContext) -> Content
+    @StateObject private var ticker = BeatTicker()
 
-    func entries(from startDate: Date, mode: TimelineScheduleMode) -> Entries {
-        Entries(index: paused ? nil : Int((startDate.timeIntervalSinceReferenceDate / interval).rounded(.up)),
-                interval: interval)
+    init(_ perSecond: Double, paused: Bool = false, @ViewBuilder content: @escaping (BeatContext) -> Content) {
+        self.interval = 1 / perSecond
+        self.paused = paused
+        self.content = content
     }
 
-    struct Entries: Sequence, IteratorProtocol {
-        var index: Int?
-        let interval: Double
+    var body: some View {
+        content(BeatContext(date: ticker.date))
+            .onChange(of: paused ? 0 : interval, initial: true) { _, interval in
+                BeatClock.shared.set(ticker, interval: interval)
+            }
+            .onDisappear { BeatClock.shared.set(ticker, interval: 0) }
+    }
+}
 
-        mutating func next() -> Date? {
-            guard let i = index else { return nil }
-            index = i + 1
-            return Date(timeIntervalSinceReferenceDate: Double(i) * interval)
+/// One `Beat`'s current tick.
+@MainActor
+final class BeatTicker: ObservableObject {
+    @Published fileprivate(set) var date = Date()
+    fileprivate var interval: Double = 0
+    fileprivate var index = 0          // the last grid point this one ticked on
+}
+
+/// The one timer behind every `Beat`. All the beats due at a tick are moved in the same turn of
+/// the run loop, so however many of them there are, the island makes one render pass for them.
+@MainActor
+final class BeatClock {
+    static let shared = BeatClock()
+
+    private var tickers: [ObjectIdentifier: BeatTicker] = [:]
+    private var timer: DispatchSourceTimer?
+    private var timerInterval: Double = 0
+
+    /// Starts, retimes or (interval 0) stops a ticker.
+    func set(_ ticker: BeatTicker, interval: Double) {
+        if interval > 0 {
+            ticker.interval = interval
+            ticker.index = Int((Date().timeIntervalSinceReferenceDate / interval).rounded(.down))
+            tickers[ObjectIdentifier(ticker)] = ticker
+        } else {
+            tickers[ObjectIdentifier(ticker)] = nil
+        }
+        retime()
+    }
+
+    /// The timer runs at the fastest rate anyone asked for, and not at all when nobody asks.
+    private func retime() {
+        let fastest = tickers.values.map(\.interval).min() ?? 0
+        guard fastest != timerInterval else { return }
+        timerInterval = fastest
+        timer?.cancel()
+        timer = nil
+        guard fastest > 0 else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        let next = ((now / fastest).rounded(.down) + 1) * fastest
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + (next - now), repeating: fastest, leeway: .milliseconds(1))
+        t.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.tick() } }
+        t.resume()
+        timer = t
+    }
+
+    private func tick() {
+        // Half a millisecond of slack, so a timer that fires a hair early still counts its tick
+        let now = Date().timeIntervalSinceReferenceDate + 0.0005
+        for ticker in tickers.values {
+            let index = Int((now / ticker.interval).rounded(.down))
+            guard index != ticker.index else { continue }
+            ticker.index = index
+            ticker.date = Date(timeIntervalSinceReferenceDate: Double(index) * ticker.interval)
         }
     }
 }
 
-extension TimelineSchedule where Self == BeatSchedule {
-    static func beat(_ perSecond: Double, paused: Bool = false) -> BeatSchedule {
-        BeatSchedule(interval: 1 / perSecond, paused: paused)
-    }
+struct BeatContext {
+    let date: Date
 }
