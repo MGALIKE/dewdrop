@@ -7,7 +7,7 @@ Dewdrop sits on screen all day. This page is the account of what it costs, how t
 The user's yardstick is **Activity Monitor → Energy → Energy Impact**. On an Apple-silicon Mac that column tracks CPU time closely, so the working metric is the app's CPU % of one core from `top`:
 
 ```sh
-top -l 4 -s 5 -pid $(pgrep -x Coucou) -stats pid,cpu,csw,power
+top -l 4 -s 5 -pid $(pgrep -x Dewdrop) -stats pid,cpu,csw,power
 ```
 
 Three to four 5-second samples, with the pointer away from the island, and the frame log (below) read alongside each one so a stray hover is not mistaken for a regression. WindowServer is sampled too: glass is composited there, and that cost does not show in the app's own row.

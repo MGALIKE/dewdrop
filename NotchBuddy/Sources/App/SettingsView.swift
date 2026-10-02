@@ -577,7 +577,7 @@ struct SettingsView: View {
     private func installHooksAppStore() {
         guard let claudeURL = pickClaudeFolder(prompt: "Select") else { return }
         let alert = NSAlert()
-        alert.messageText = "Install Coucou hooks in ~/.claude?"
+        alert.messageText = "Install Dewdrop hooks in ~/.claude?"
         alert.informativeText = "Will write:\n• ~/.claude/coucou/nb-hook\n• ~/.claude/settings.json (backup created first)"
         alert.addButton(withTitle: "Install")
         alert.addButton(withTitle: "Cancel")

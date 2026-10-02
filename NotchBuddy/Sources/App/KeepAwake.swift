@@ -34,7 +34,7 @@ final class KeepAwake {
     func set(_ on: Bool) {
         AppState.shared.keepAwake = on
         if on {
-            hold(&manualAssertion, type: kIOPMAssertionTypePreventUserIdleDisplaySleep, reason: "Coucou: keep awake")
+            hold(&manualAssertion, type: kIOPMAssertionTypePreventUserIdleDisplaySleep, reason: "Dewdrop: keep awake")
         } else {
             release(&manualAssertion)
         }
@@ -46,7 +46,7 @@ final class KeepAwake {
     /// Automatic: the system stays up while Claude Code works (the display may still dim).
     private func updateAuto(claudeBusy: Bool) {
         if claudeBusy && AppState.shared.keepAwakeAuto {
-            hold(&autoAssertion, type: kIOPMAssertionTypePreventUserIdleSystemSleep, reason: "Coucou: Claude Code is working")
+            hold(&autoAssertion, type: kIOPMAssertionTypePreventUserIdleSystemSleep, reason: "Dewdrop: Claude Code is working")
         } else {
             release(&autoAssertion)
         }

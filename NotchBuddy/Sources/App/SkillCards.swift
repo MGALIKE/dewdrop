@@ -180,7 +180,7 @@ struct MusicCardView: View {
             SkillHeader(color: "#EC4899", title: "Music", subtitle: "Nothing playing")
 
             Text(appState.musicAutomationDenied
-                 ? "Allow Coucou under Privacy → Automation to use the controls."
+                 ? "Allow Dewdrop under Privacy → Automation to use the controls."
                  : "Play something in Spotify or Apple Music.")
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.6))

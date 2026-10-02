@@ -6,6 +6,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     private(set) var islandController: IslandWindowController?
 
+    override init() {
+        super.init()
+        Migration.settingsIfNeeded()   // before AppState reads a single default
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ignore SIGPIPE — prevents crash when nb-hook closes socket before we write response
         signal(SIGPIPE, SIG_IGN)
@@ -26,13 +31,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenuBarItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = statusItem?.button else { return }
-        button.image = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Coucou")
+        button.image = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Dewdrop")
         button.image?.size = NSSize(width: 24, height: 18)
-        button.image?.accessibilityDescription = "Coucou"
+        button.image?.accessibilityDescription = "Dewdrop"
         button.image?.isTemplate = true
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open Coucou", action: #selector(openIsland), keyEquivalent: "")
+        menu.addItem(withTitle: "Open Dewdrop", action: #selector(openIsland), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
@@ -60,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 720),
                            styleMask: [.titled, .closable, .miniaturizable, .resizable],
                            backing: .buffered, defer: false)
-        win.title = "Settings — Coucou"
+        win.title = "Settings — Dewdrop"
         let host = NSHostingView(rootView: SettingsView())
         host.sizingOptions = [.minSize]
         win.contentView = host
@@ -210,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.debugBanner(retries: 12) {
                     let finished = claude == "finished"
                     IslandWindowController.shared?.showToast(IslandToast(
-                        symbol: finished ? "checkmark" : "hand.raised.fill", title: "coucou",
+                        symbol: finished ? "checkmark" : "hand.raised.fill", title: "dewdrop",
                         subtitle: finished ? "All four features are in and build cleanly." : "Claude needs your permission to use Bash",
                         accent: finished ? "#34D399" : "#F5A524", focusId: "integration_claude",
                         action: .jump(taskId: "integration_claude")), duration: 30)

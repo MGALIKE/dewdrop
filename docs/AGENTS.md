@@ -1,6 +1,8 @@
-# Coucou — third-party agent integration
+# Dewdrop — third-party agent integration
 
-Any tool that can write to a Unix domain socket (macOS) or a named pipe (Windows) can send events to Coucou and have its own pill next to Claude Code.
+(The hook relay, its socket and the payload fields keep the names they had in Coucou — `nb-hook`, `coucou_agent`, `coucou_origin` — so agents written for either app work with both.)
+
+Any tool that can write to a Unix domain socket (macOS) or a named pipe (Windows) can send events to Dewdrop and have its own pill next to Claude Code.
 
 ## The `coucou_agent` field
 
@@ -10,7 +12,7 @@ Add the optional field `coucou_agent` to any hook JSON payload. Coucou will crea
 
 ## Hook command (macOS)
 
-Configure your tool to call the Coucou relay with `--agent <your-name>` after the hook executable:
+Configure your tool to call the Dewdrop relay with `--agent <your-name>` after the hook executable:
 
 ```json
 {
@@ -82,10 +84,10 @@ The pill lifecycle:
 
 ### Gemini CLI (macOS)
 
-Coucou supports Gemini CLI out of the box via **Settings → Gemini CLI → Install hooks**.
+Dewdrop supports Gemini CLI out of the box via **Settings → Gemini CLI → Install hooks**.
 The installer writes to `~/.gemini/settings.json` and uses `--agent gemini` so
 Gemini sessions get their own pill. The relay translates Gemini event names to canonical
-Coucou events automatically.
+Dewdrop events automatically.
 
 | Gemini CLI event | Canonical event |
 |---|---|
@@ -98,7 +100,7 @@ Coucou events automatically.
 
 ### Antigravity — `agy` (macOS)
 
-Coucou supports Antigravity out of the box via **Settings → Antigravity → Install hooks**.
+Dewdrop supports Antigravity out of the box via **Settings → Antigravity → Install hooks**.
 The installer writes to `~/.gemini/config/hooks.json` (timeouts in seconds) and uses
 `--agent antigravity`. The relay translates `toolCall.name` / `conversationId` to the
 island's `tool_name` / `session_id`.
@@ -119,7 +121,7 @@ forward the event.
 
 ## Quick test (macOS)
 
-With Coucou running:
+With Dewdrop running:
 
 ```sh
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"t1","prompt":"hello","coucou_agent":"demo"}' \

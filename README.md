@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/media/icon.png" width="128" alt="Dewdrop icon">
+
 # Dewdrop
 
 **A drop of Liquid Glass in your Mac's notch that keeps an eye on your Claude Code sessions — and costs about 1 % of a core while it does.**
@@ -111,12 +113,12 @@ There is no release yet (see [Status](#status)). Build from source:
 
 ```bash
 brew install xcodegen
-git clone git@github.com:MGALIKE/coucou-fork.git dewdrop
+git clone git@github.com:MGALIKE/dewdrop.git
 cd dewdrop/NotchBuddy
 xcodegen
 xcodebuild -scheme NotchBuddy -configuration Release -derivedDataPath build build
-cp -R build/Build/Products/Release/Coucou.app /Applications/
-open /Applications/Coucou.app
+cp -R build/Build/Products/Release/Dewdrop.app /Applications/
+open /Applications/Dewdrop.app
 ```
 
 ## Setup
@@ -154,7 +156,7 @@ If the app isn't running, the hook exits immediately: **Claude Code is never blo
 - **Claude Code:** a tiny `nb-hook` script receives hook events and forwards them over a Unix socket to the app. For approvals it waits for your click, then answers the hook. Sessions are matched to their terminal by TTY so the island can jump to the right tab.
 - **Chat:** through the `claude` CLI (`-p`, streaming JSON), so it uses your plan; usage numbers come from the same stream.
 - **Monitors:** music via the players' distributed notifications (no polling), timers and system stats on slow timers that run only when their pill is on, weather every 30 minutes.
-- **Sounds:** short WAVs through preloaded `AVAudioPlayer`s.
+- **Sounds:** 28 short WAVs — plips, bubbles, drops and small glass bells, synthesised from a script (`design/sounds/make.py`) — through preloaded `AVAudioPlayer`s.
 
 Native Swift 6 / SwiftUI / AppKit, strict concurrency, **zero third-party dependencies**.
 
@@ -175,7 +177,7 @@ Logs go to `~/Library/Logs/NotchBuddy/nb.log`.
 
 ## Status
 
-This is a fork of [Coucou](https://github.com/Louis-CFM/coucou) that grew its own character and a different idea of what the island should cost. It is being renamed: the character is done, the **app name (Dewdrop), icon, sounds and bundle identifier are still being decided**, and until the upstream name, icon and sounds are replaced the repository stays private (see the licence note below). The upstream Windows port is not part of this fork.
+This is a fork of [Coucou](https://github.com/Louis-CFM/coucou) that grew its own character and a different idea of what the island should cost. The rename is done: name, character, icon, sounds and bundle identifier (`com.mgalike.dewdrop`) are Dewdrop's own; settings from a previous Coucou install are carried over on first launch, the hooks keep working, and macOS asks again once for the Automation and Accessibility permissions. There is no signed release yet. The upstream Windows port is not part of this fork.
 
 What is different from upstream, in short: sessions from any terminal (not only VS Code) and a jump back to their tab · chat on your Claude subscription through the CLI · the live-activity pills (Music, Timer, System, Shelf, Clipboard, Notes), Dynamic-Island banners and the Claude hub · Liquid Glass styling of the island and a glass character · the energy work above (folded 12–15 % → ~1 %, open ~50 % → 1–13 %).
 
@@ -184,6 +186,7 @@ What is different from upstream, in short: sessions from any terminal (not only 
 Dewdrop started as a fork of **Coucou** by [Louis Raillé](https://louisraille.fr), who had the idea of an open notch companion for Claude Code and built most of what you see here — the island, the hooks, the integrations, the sounds and the Mochi character this one replaced. Thank you.
 
 - **Code:** [MIT](LICENSE) — the original copyright notice is kept, as the licence asks.
-- **The names "Coucou" and "Mochi", the Mochi character, the original icon, sounds and media** are © Louis Raillé, all rights reserved ([LICENSE-ASSETS.md](LICENSE-ASSETS.md)). Dew, its animations and the images in this README are this fork's own.
+- **The names "Coucou" and "Mochi", the Mochi character, the original icon, sounds and media** are © Louis Raillé, all rights reserved ([LICENSE-ASSETS.md](LICENSE-ASSETS.md)) and are no longer in this repository.
+- **Dew, the Dewdrop icon, the sounds and the images here** are this fork's own and come under the same MIT licence as the code.
 
 Built with [Claude Code](https://claude.com/claude-code).
