@@ -5,6 +5,10 @@ import SwiftUI
 @MainActor
 final class IslandWindowController: NSWindowController {
 
+    /// The one island. (`NSApp.delegate` is SwiftUI's adaptor, not our AppDelegate, so monitors
+    /// reach the controller through here.)
+    static weak var shared: IslandWindowController?
+
     private var islandPanel: IslandPanel!
     private var state: AppState { AppState.shared }
 
@@ -14,6 +18,12 @@ final class IslandWindowController: NSWindowController {
     private var wasInIsland = false
     private var frameTimer: Timer?
     private var keyMonitor: Any?
+    private var clickAwayMonitor: Any?
+
+    // Dynamic-Island toast
+    private var toastTimer: DispatchWorkItem?
+    private var toastReturnMode: IslandMode = .compact
+    private var quietTransition = false   // no open/close sounds for banners and live activities
     private var viewSubscription: AnyCancellable?
 
     // Confused recovery timer (set by handleDizzy)
@@ -75,6 +85,8 @@ final class IslandWindowController: NSWindowController {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
+        // The island is always dark: glass must render in its dark variant whatever the system theme
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true
@@ -136,6 +148,7 @@ final class IslandWindowController: NSWindowController {
 
         startPolling()
         startKeyMonitor()
+        startClickAwayMonitor()
         wireFSM()
 
         // Make panel key whenever the prompt/chat view becomes active
@@ -157,13 +170,15 @@ final class IslandWindowController: NSWindowController {
             guard let self else { return }
             switch to {
             case .hidden:
+                // Like a Live Activity: while music plays or a timer runs the island stays out.
+                if self.state.hasLiveActivity || (self.state.mode == .expanded && self.state.view == .toast) { break }
                 self.setMode(.hidden)
 
             case .petit:
                 if from == .coucou {
                     // Fire interrupt first so canvas collapse starts before mode change
                     NotificationCenter.default.post(name: .greetingInterrupt, object: nil)
-                } else if from == .hidden {
+                } else if from == .hidden && self.state.mode == .hidden {
                     SoundEngine.shared.play("peek")
                 }
                 // setMode BEFORE changing view: onChange(of: state.view) guards on .expanded,
@@ -193,14 +208,25 @@ final class IslandWindowController: NSWindowController {
         }
     }
 
-    // MARK: - 60 Hz polling loop
+    // MARK: - Pointer polling
+    // 60 Hz while the pointer is near the island or the island is open; a relaxed 20 Hz the rest
+    // of the time, so the Mac is not woken 60 times a second for a pointer nowhere near the notch.
 
-    private func startPolling() {
-        frameTimer = Timer.scheduledTimer(withTimeInterval: 1.0/60.0, repeats: true) { [weak self] _ in
+    private var pollRate: Double = 0
+
+    private func startPolling() { setPollRate(60) }
+
+    private func setPollRate(_ rate: Double) {
+        guard rate != pollRate else { return }
+        pollRate = rate
+        frameTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / rate, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in self.pollFrame() }
         }
-        RunLoop.main.add(frameTimer!, forMode: .common)
+        timer.tolerance = rate < 60 ? 0.015 : 0
+        RunLoop.main.add(timer, forMode: .common)
+        frameTimer = timer
     }
 
     private func pollFrame() {
@@ -219,6 +245,10 @@ final class IslandWindowController: NSWindowController {
         let hoverRect = !hasNotch && state.mode != .expanded
             ? islandRect : islandRect.insetBy(dx: -6, dy: -6)
         let inIsland = hoverRect.contains(local)
+
+        let near = islandRect.insetBy(dx: -240, dy: -240).contains(local)
+        IslandMotion.shared.pointerNear = near
+        setPollRate(state.mode == .expanded || near || inAttachDrag || attachDragStart != nil ? 60 : 20)
 
         // Toggle click-through
         let shouldAcceptMouse = inIsland || inAttachDrag || attachDragStart != nil
@@ -239,6 +269,8 @@ final class IslandWindowController: NSWindowController {
 
         // AppState can hide the island by itself (last task ended): keep the FSM in step.
         if state.mode == .hidden && fsm.state == .petit { fsm.hiddenExternally() }
+
+        if inIsland != wasInIsland { IslandMotion.shared.pointer(onIsland: inIsland) }
 
         // Feed FSM hover enter/leave
         if inIsland && !wasInIsland {
@@ -328,9 +360,13 @@ final class IslandWindowController: NSWindowController {
         let anim: Animation = shrinking
             ? .timingCurve(0.45, 0, 0.2, 1, duration: 0.34)
             : .spring(response: 0.5, dampingFraction: 0.72)
+        if mode == .expanded { IslandMotion.shared.islandWillOpen() }
         withAnimation(anim) { state.mode = mode }
-        if mode == .expanded { SoundEngine.shared.play("open") }
-        if prev == .expanded { SoundEngine.shared.play("close"); state.isPinned = false }
+        if mode == .expanded && !quietTransition { SoundEngine.shared.play("open") }
+        if prev == .expanded {
+            if !quietTransition { SoundEngine.shared.play("close") }
+            state.isPinned = false
+        }
     }
 
     func expand(to view: IslandView) {
@@ -344,6 +380,7 @@ final class IslandWindowController: NSWindowController {
     }
 
     func collapse() {
+        if state.mode == .expanded && state.view == .toast { dismissToast(); return }
         state.isPinned = false
         finishedPinTimer?.cancel()
         // Keep the FSM in step with what is on screen (home/coucou → petit now).
@@ -352,7 +389,68 @@ final class IslandWindowController: NSWindowController {
         window?.resignKey()
     }
 
+    // MARK: - Dynamic Island: toast + live activities
+
+    /// Drops a short banner from the notch. Never interrupts an open island or a pending approval.
+    func showToast(_ toast: IslandToast, duration: TimeInterval = 3.6) {
+        let showing = state.mode == .expanded && state.view == .toast
+        guard state.isPresent, state.pendingApproval == nil, !inAttachDrag,
+              state.mode != .expanded || showing else { return }
+        if !showing { toastReturnMode = state.mode }
+        state.toast = toast
+        if !showing {       // already out: just swap the content (a volume key held down lands here)
+            quietTransition = true
+            expand(to: .toast)
+            quietTransition = false
+        }
+        scheduleToastDismiss(after: duration)
+    }
+
+    private func scheduleToastDismiss(after delay: TimeInterval) {
+        toastTimer?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.state.mode == .expanded, self.state.view == .toast else { return }
+            // Linger while the cursor rests on it
+            if self.wasInIsland { self.scheduleToastDismiss(after: 1.2) } else { self.dismissToast() }
+        }
+        toastTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    private func dismissToast() {
+        toastTimer?.cancel()
+        guard state.mode == .expanded, state.view == .toast else { return }
+        quietTransition = true
+        setMode(toastReturnMode == .hidden && !state.hasLiveActivity ? .hidden : .compact)
+        quietTransition = false
+        state.view = defaultView()
+    }
+
+    /// Music started/stopped or a timer changed: bring the folded island out, or let it go.
+    func liveActivityChanged() {
+        if state.hasLiveActivity {
+            guard state.mode == .hidden, state.isPresent else { return }
+            quietTransition = true
+            setMode(.compact)
+            quietTransition = false
+        } else if state.mode == .compact, fsm.state == .hidden, !wasInIsland {
+            setMode(.hidden)
+        }
+    }
+
     // MARK: - Keyboard (Escape closes)
+
+    /// Clicking anywhere outside the island folds it right away (no waiting for the hover timer).
+    /// Global monitors only see events aimed at other apps, so clicks inside the island never land here.
+    private func startClickAwayMonitor() {
+        clickAwayMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state.mode == .expanded, !self.state.isPinned,
+                      !self.inAttachDrag, self.state.view != .upload, self.state.view != .uploading else { return }
+                self.collapse()
+            }
+        }
+    }
 
     private func startKeyMonitor() {
         keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -513,6 +611,8 @@ final class IslandWindowController: NSWindowController {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
+        // The island is always dark: glass must render in its dark variant whatever the system theme
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 4)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         panel.ignoresMouseEvents = true
@@ -872,6 +972,7 @@ func islandSize(mode: IslandMode, view: IslandView,
     case .compact:  return (nw + 160, nh)
     case .expanded:
         let layout = IslandConst.viewLayouts[view]!
-        return (IslandConst.expandedWidth, layout.height)
+        if view == .toast { return (layout.width ?? IslandConst.expandedWidth, nh + 52) }
+        return (layout.width ?? IslandConst.expandedWidth, layout.height)
     }
 }

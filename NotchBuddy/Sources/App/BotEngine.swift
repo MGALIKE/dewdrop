@@ -31,7 +31,7 @@ struct Tween {
 // MARK: - Particle
 
 struct Particle {
-    enum ParticleType { case heart, star, spark, sweat, z }
+    enum ParticleType { case heart, star, spark, sweat, z, note }
     var type: ParticleType
     var x, y, vx, vy: CGFloat
     var age: Double        // seconds
@@ -58,6 +58,14 @@ struct BotStateCfg {
     let look: CGPoint?     // fixed look direction
     let tilt: CGFloat
     let sound: String?
+}
+
+/// Ambient mood layered on top of the idle state (music, battery, CPU).
+enum BotMood {
+    case none
+    case groove   // music playing: hops and sways in rhythm, happy eyes, ♪ particles
+    case sleepy   // low battery: droopy eyes, slow breathing, yawns
+    case sweaty   // CPU maxed: wide eyes, shiver, sweat drops
 }
 
 enum EyeShape: String {
@@ -199,6 +207,7 @@ final class BotEngine: ObservableObject {
 
     // Particle canvas overhang (extra canvas height at top for hearts to fly into)
     var particleOverhang: CGFloat = 0
+    var displayScale: CGFloat = 1      // on-screen scale of the canvas (the main Mochi is drawn large and scaled)
 
     // Mouth spring (fraction of R: 0=closed, 0.20=hover, 0.42=open, 0.50=overopen)
     var slotH: CGFloat = 0           // current height (fraction of R)
@@ -213,6 +222,28 @@ final class BotEngine: ObservableObject {
     // State
     var state: BotState = .idle
     var cfg: BotStateCfg = BotStates[.idle]!
+
+    // Ambient mood (set every frame by the canvas views)
+    var mood: BotMood = .none
+    var moodNextYawn: Double = 0
+    private var moodEye: EyeShape? {
+        switch mood {
+        case .none:   return nil
+        case .groove: return .happy
+        case .sleepy: return .tired
+        case .sweaty: return .wide
+        }
+    }
+
+    // Props (headphones, mug, hats): set every frame by the canvas, each pops in on a spring.
+    // See BotProps.swift.
+    var props: BotProps = []
+    var propAmount = [CGFloat](repeating: 0, count: BotProps.order.count)
+    var propVel = [CGFloat](repeating: 0, count: BotProps.order.count)
+    var scribbleUntil: Double = 0      // the pencil is out until then
+    var hintEye: EyeShape? = nil       // eyes suggested by what is on screen (muted, very loud…)
+    var anticsEnabled = false          // main Mochi only
+    var nextAntic: Double = CACurrentMediaTime() + 14
 
     // Eye override (emote)
     var eyeOverride: EyeShape? = nil
@@ -239,6 +270,13 @@ final class BotEngine: ObservableObject {
 
     // Timing
     var lastTime: Double = CACurrentMediaTime()
+    var lastMotion: Double = CACurrentMediaTime()   // last frame in which `isAnimating` was true
+
+    // Energy: the canvas is only redrawn while something on Mochi changes (see `isAnimating`,
+    // `wantsWake`). Motions that never stop (the dance, breathing, an impatient bounce) would
+    // keep it redrawing all day, so they only play while the pointer is on the island.
+    var externalMotion = false         // true: those endless motions are switched off
+    var ambientInterval: Double = 1.3  // seconds between ambient particles (notes, z, sweat)
     var t0: Double = CACurrentMediaTime() - Double.random(in: 0...5)
     var nextBlink: Double = CACurrentMediaTime() + 1.5 + Double.random(in: 0...2)
     var waveUntil: Double = 0
@@ -636,6 +674,54 @@ final class BotEngine: ObservableObject {
         }
     }
 
+    /// True while something on Mochi is changing, so the canvas has to be redrawn: a blink, an
+    /// emote, eyes following the pointer, a prop popping in, a colour fading to the next state.
+    var isAnimating: Bool {
+        if !tweens.isEmpty || !particles.isEmpty { return true }
+        if abs(tgYaw - yaw) > 0.02 || abs(tgPitch - pitch) > 0.02 || abs(tgTilt - tilt) > 0.01 { return true }
+        if abs(tgSy - sy) > 0.004 || abs(tgSx - sx) > 0.004 || abs(tgEs - es) > 0.004 { return true }
+        if abs(col.0 - colT.0) + abs(col.1 - colT.1) + abs(col.2 - colT.2) > 0.01 { return true }
+        if morph > 0.01 || slotH > 0.005 || abs(slotHTarget - slotH) > 0.005 || abs(ox) > 0.002 { return true }
+        if isChewing || CACurrentMediaTime() < waveUntil { return true }
+        return propVel.contains { $0 != 0 }
+    }
+
+    /// Asked a few times a second while the canvas is asleep: is something about to happen that
+    /// needs drawing (a blink is due, the pointer moved, a mini wants to glance around)?
+    /// Looks without touching anything, so the event itself starts on a drawn frame.
+    func wantsWake(lookX: CGFloat, lookY: CGFloat) -> Bool {
+        let now = CACurrentMediaTime()
+        if state == .dizzy || cfg.scans { return true }
+        if now > nextBlink && state != .sleeping { return true }
+        if eyeOverride != nil && eyeOverride != permanentEye && now > eyeOverrideUntil { return true }
+        if now - lastAmbient > ambientInterval,
+           cfg.zz || mood == .sleepy || (!isMini && (cfg.sweat || mood == .groove || mood == .sweaty)) { return true }
+        if isMini {
+            if now > miniNextBehavior { return true }
+            return cfg.look == nil && state != .sleeping && now > miniLookNextTime
+        }
+        if mood == .sleepy && now > moodNextYawn { return true }
+        if anticsEnabled && now > nextAntic && state == .idle && mood == .none && morph < 0.05 && eyeOverride == nil { return true }
+        // The pointer moved far enough for the eyes to follow (not behind the laptop: they stay on the screen)
+        if state != .sleeping && !props.contains(.laptop) {
+            var ty = lookX * 0.62, tp = lookY * 0.5
+            if let fixed = cfg.look {
+                ty = ty * 0.35 + fixed.x * 0.55
+                tp = tp * 0.3 + fixed.y * 0.5
+            }
+            if mood == .sleepy { tp -= 0.1 }
+            if abs(ty - yaw) > 0.05 || abs(tp - pitch) > 0.05 { return true }
+        }
+        return false
+    }
+
+    /// Advances the engine to now. It was tuned for one 0.05 step per frame at `stepsPerSecond`;
+    /// taking as many steps as that many-th of a second went by keeps its pace at any frame rate.
+    func advance(stepsPerSecond: Double) {
+        let steps = min(12, max(1, Int(((CACurrentMediaTime() - lastTime) * stepsPerSecond).rounded())))
+        for _ in 0..<steps { update(dt: 0.05) }
+    }
+
     // MARK: - Update (called every frame from TimelineView)
 
     func update(dt: Double) {
@@ -706,11 +792,63 @@ final class BotEngine: ObservableObject {
             tgTilt = -0.06 + sin(2 * .pi * 1.2 * wt) * 0.07
         }
 
-        let bounce = cfg.bounces ? -abs(sin(t * 5.2)) * 0.07 : CGFloat(0)
+        var bounce = cfg.bounces && !externalMotion ? -abs(sin(t * 5.2)) * 0.07 : CGFloat(0)
+
+        // Mood overlays. Groove: ~112 BPM, one hop per beat, lean every other beat.
+        let beat = t * (112.0 / 60.0) * .pi
+        switch mood {
+        case .groove where externalMotion:
+            break   // no dancing while nobody is watching
+        case .groove:
+            // Three moves, eight beats each: hop, side-to-side shuffle, head bob
+            switch isMini ? 0 : Int(beat / .pi / 8) % 3 {
+            case 1:
+                bounce = -abs(sin(beat)) * 0.04
+                tgTilt = sin(beat) * 0.16
+            case 2:
+                bounce = -abs(sin(beat * 2)) * 0.05
+                tgTilt = sin(beat * 0.5) * 0.07
+                tgPitch = tp + sin(beat * 2) * 0.14
+            default:
+                bounce = -abs(sin(beat)) * (isMini ? 0.16 : 0.11)
+                tgTilt = sin(beat) * 0.10
+            }
+        case .sleepy:
+            tgPitch = tp - 0.1
+            if !isMini && now > moodNextYawn {
+                if moodNextYawn > 0 { triggerEmote(.yawn, duration: 2.2) }
+                moodNextYawn = now + 12 + Double.random(in: 0...8)
+            }
+        case .sweaty, .none:
+            break
+        }
+        if !locks.contains("ox") {
+            if externalMotion {
+                ox = abs(ox) < 0.001 ? 0 : ox * 0.8
+            } else if mood == .sweaty {
+                ox = sin(t * 38) * 0.014
+            } else if mood == .groove && !isMini && Int(beat / .pi / 8) % 3 == 1 {
+                ox += (sin(beat) * 0.10 - ox) * CGFloat(1 - pow(0.0008, dt))     // shuffle
+            } else {
+                ox = abs(ox) < 0.001 ? 0 : ox * 0.8
+            }
+        }
+        // Behind a laptop Mochi keeps its eyes just over the lid; with a magnifier it follows the lens
+        if props.contains(.laptop) && !isMini {
+            tgPitch = 0.10
+            tgYaw = tgYaw * 0.35 + sin(t * 1.7) * 0.10
+        }
         // oy tween can override if not locked
         if !locks.contains("oy") { oy += (bounce - oy) * CGFloat(1 - pow(0.0008, dt)) }
 
-        if cfg.breathes {
+        if externalMotion {
+            tgSy = 1; tgSx = 1
+        } else if mood == .groove {
+            // Squash on landing, stretch at the top of each hop
+            let hop = abs(sin(beat)) - 0.5
+            tgSy = 1 + hop * 0.07
+            tgSx = 1 - hop * 0.045
+        } else if cfg.breathes || mood == .sleepy {
             let amp: CGFloat = isMini ? 0.07 : 0.035
             tgSy = 1 + sin(t * 1.8) * amp
             tgSx = 1 - sin(t * 1.8) * amp * 0.57
@@ -759,10 +897,16 @@ final class BotEngine: ObservableObject {
         }
 
         // Ambient particles
-        if now - lastAmbient > 1.3 {
+        if now - lastAmbient > ambientInterval {
             lastAmbient = now
             if cfg.zz { emit(.z, count: 1) }   // ZZZ works for mini too
             if !isMini && cfg.sweat && Double.random(in: 0...1) < 0.5 { emit(.sweat, count: 1) }
+            switch mood {
+            case .groove: if !isMini && Double.random(in: 0...1) < 0.75 { emit(.note, count: 1) }
+            case .sleepy: if !cfg.zz && Double.random(in: 0...1) < 0.4 { emit(.z, count: 1) }
+            case .sweaty: if !isMini && !cfg.sweat { emit(.sweat, count: 1) }
+            case .none:   break
+            }
         }
 
         // Age particles
@@ -776,6 +920,9 @@ final class BotEngine: ObservableObject {
                     - 2 * slotZeta * slotOmega * slotHVel
         slotHVel += slotAcc * dtCG
         slotH = max(0, slotH + slotHVel * dtCG)
+
+        updateProps(dt: dt)
+        updateAntics(now: now)
 
         lastTime = now
     }
@@ -869,7 +1016,7 @@ final class BotEngine: ObservableObject {
         let W = size.width, H = size.height
         let R = W * 0.3
         // Only draw hands when Mochi is large enough to be meaningful (not compact/peek)
-        guard R > 14 else { return }
+        guard R * displayScale > 14 else { return }
         let rx = R * 1.14
         let ry = R * 0.88
         let cx = W / 2 + ox * R
@@ -980,7 +1127,7 @@ final class BotEngine: ObservableObject {
 
     // MARK: - Private draw helpers
 
-    private func mochiPath(rx: CGFloat, ry: CGFloat, morph: CGFloat, R: CGFloat) -> Path {
+    func mochiPath(rx: CGFloat, ry: CGFloat, morph: CGFloat, R: CGFloat) -> Path {
         let n = 72
         let expN: CGFloat = 2.0 / 2.7
         // Target mailbox dims (spec: 1.0R wide, 0.94R tall, 0.42R corner radius)
@@ -1111,7 +1258,7 @@ final class BotEngine: ObservableObject {
     }
 
     private func drawEyes(ctx: inout GraphicsContext, path: Path, R: CGFloat, rx: CGFloat, ry: CGFloat) {
-        var shape = eyeOverride ?? cfg.eye
+        var shape = eyeOverride ?? hintEye ?? moodEye ?? cfg.eye
         // In box mode: cup eyes when file over box (slotHTarget set), happy arcs while chewing
         if morph > 0.5 {
             if isChewing { shape = .happy }
@@ -1345,6 +1492,10 @@ final class BotEngine: ObservableObject {
                 drop.addQuadCurve(to: CGPoint(x: 0, y: sz*0.6), control: CGPoint(x: sz*0.8, y: sz*0.2))
                 drop.addQuadCurve(to: CGPoint(x: 0, y: -sz), control: CGPoint(x: -sz*0.8, y: sz*0.2))
                 pctx.fill(drop, with: .color(Color(hex: "#7CC7FF")))
+            case .note:
+                pctx.rotate(by: .radians(sin(CGFloat(p.age) * 5 + p.rot) * 0.35))
+                pctx.draw(Text(p.rot > .pi ? "♪" : "♫").font(.system(size: sz*2.1, weight: .bold)).foregroundColor(Color(hex: "#F9A8D4")),
+                          at: .zero)
             case .z:
                 pctx.draw(Text("z").font(.system(size: sz*1.9, weight: .bold)).foregroundColor(Color(red: 0.82, green: 0.86, blue: 0.92)),
                           at: .zero)
@@ -1464,7 +1615,7 @@ private func emoteEyeShape(_ e: BotEmote) -> EyeShape {
 
 // MARK: - Shape helpers
 
-private func heartShape(size s: CGFloat) -> Path {
+func heartShape(size s: CGFloat) -> Path {
     var p = Path()
     p.move(to: CGPoint(x: 0, y: s * 0.38))
     p.addCurve(to: CGPoint(x: 0, y: -s * 0.38),
@@ -1477,7 +1628,7 @@ private func heartShape(size s: CGFloat) -> Path {
     return p
 }
 
-private func starShape(outer ro: CGFloat, inner ri: CGFloat) -> Path {
+func starShape(outer ro: CGFloat, inner ri: CGFloat) -> Path {
     var p = Path()
     for i in 0..<10 {
         let r = i.isMultiple(of: 2) ? ro : ri

@@ -38,6 +38,13 @@ struct IslandContainer: View {
         return min(300, base + CGFloat(state.chatHistory.count) * perMsg)
     }
 
+    /// Final size of the open island for the current view (what the spring is heading to).
+    private var openSize: CGSize {
+        let (w, h) = islandSize(mode: .expanded, view: state.view, progress: state.uploadProgress,
+                                nw: state.notchWidth, nh: state.notchHeight)
+        return CGSize(width: w, height: state.view == .prompt ? chatPromptHeight : h)
+    }
+
     /// Pixels the content must be pushed down to clear the concave ear transparent area.
     /// = 0 in expanded mode (no ears), = earRadius in compact/notch mode.
     private var earOffset: CGFloat { max(0, -islandTopRadius) }
@@ -53,10 +60,11 @@ struct IslandContainer: View {
         let greetingActive = state.mode == .expanded && state.view == .greeting
 
         return ZStack(alignment: .topLeading) {
-            // Black island shape
-            IslandShape(width: islandWidth, height: islandHeight,
-                        cornerRadius: cornerRadius, topRadius: islandTopRadius)
-                .fill(Color.black)
+            // Island body: black while it is the notch, a slab of glass once it opens
+            IslandBody(shape: IslandShape(width: islandWidth, height: islandHeight,
+                                          cornerRadius: cornerRadius, topRadius: islandTopRadius),
+                       glass: state.mode == .expanded && !greetingActive,
+                       notchWidth: state.notchWidth, notchHeight: state.notchHeight)
 
             // Content
             if state.mode == .expanded {
@@ -81,10 +89,24 @@ struct IslandContainer: View {
                             .offset(y: 8)
                     }
                     .transition(.opacity)
+                } else if state.view == .toast {
+                    let target = openSize
+                    IslandToastView(state: state, width: target.width, height: target.height)
+                        .offset(x: (islandWidth - target.width) / 2)
+                        .frame(width: islandWidth, height: islandHeight, alignment: .topLeading)
+                        .clipShape(IslandShape(width: islandWidth, height: islandHeight,
+                                              cornerRadius: cornerRadius, topRadius: islandTopRadius))
+                        .transition(.opacity)
                 } else {
+                    // The content is laid out once, at the size the island is opening to, and the
+                    // growing island shape reveals it. Resizing it with the spring would re-lay-out
+                    // and redraw every card on every frame, which is what made opening stutter.
+                    let target = openSize
                     IslandContentView(state: state)
-                        .frame(width: islandWidth, height: islandHeight - earOffset)
-                        .offset(y: earOffset)
+                        .animation(nil) { $0.frame(width: target.width, height: target.height - earOffset) }
+                        .background(IslandBackdrop(state: state))
+                        .offset(x: (islandWidth - target.width) / 2, y: earOffset)
+                        .frame(width: islandWidth, height: islandHeight, alignment: .topLeading)
                         .clipShape(IslandShape(width: islandWidth, height: islandHeight,
                                               cornerRadius: cornerRadius, topRadius: islandTopRadius))
                         .transition(.opacity)
@@ -106,11 +128,16 @@ struct IslandContainer: View {
 
             CountdownBar(state: state, islandW: islandWidth)
 
+            if state.mode == .expanded && state.view != .toast {
+                ConfettiView(trigger: state.celebration, size: CGSize(width: islandWidth, height: islandHeight))
+                    .clipShape(IslandShape(width: islandWidth, height: islandHeight,
+                                          cornerRadius: cornerRadius, topRadius: islandTopRadius))
+            }
+
             Group {
                 if state.mode == .compact {
-                    CompactMiniGrid(state: state)
-                        .scaleEffect(IslandRestingLayout(width: islandWidth, height: islandHeight).miniGridScale)
-                        .position(x: islandWidth - 40, y: islandHeight / 2)
+                    // Live activity (timer, music) or the mini Mochis
+                    CompactActivityView(state: state, islandWidth: islandWidth, islandHeight: islandHeight)
                         .transition(.opacity)
                 }
             }
@@ -253,6 +280,9 @@ struct IslandShape: Shape {
 // MARK: - Bot placement helper
 
 struct BotPlacement: View {
+    /// Mochi's largest diameter across the island's views (see `IslandConst.viewLayouts`).
+    static let designDiameter: CGFloat = 66
+
     @ObservedObject var state: AppState
     let islandW: CGFloat
     let islandH: CGFloat
@@ -262,6 +292,12 @@ struct BotPlacement: View {
         let canvasSize = diameter / 0.6
         let overhang: CGFloat = 40
         let isUploading = state.view == .uploading
+        // Mochi is drawn on a canvas of one fixed size (its largest) and scaled to the size each
+        // view wants. Resizing the canvas itself made it reallocate its surface on every frame of
+        // the opening spring.
+        let design = BotPlacement.designDiameter / 0.6
+        let designOverhang: CGFloat = 44
+        let scale = canvasSize / design
 
         Group {
             // No glow in uploading mode — the tiny dot doesn't need it
@@ -305,10 +341,11 @@ struct BotPlacement: View {
                 }
                 .transition(.scale(scale: 0.01, anchor: .center).combined(with: .opacity))
             } else {
-                BotCanvasView(state: state, particleOverhang: overhang)
-                    .frame(width: canvasSize, height: canvasSize + overhang)
+                BotCanvasView(state: state, particleOverhang: designOverhang, displayScale: scale)
+                    .frame(width: design, height: design + designOverhang)
+                    .scaleEffect(scale)
                     .opacity(state.isDraggingBot ? 0 : opacity)
-                    .position(x: cx, y: cy - overhang / 2)
+                    .position(x: cx, y: cy - designOverhang * scale / 2)
                     .animation(.spring(response: 0.5, dampingFraction: 0.72), value: cx)
                     .animation(.spring(response: 0.5, dampingFraction: 0.72), value: cy)
                     .animation(.spring(response: 0.5, dampingFraction: 0.72), value: canvasSize)
@@ -354,6 +391,8 @@ func botPosition(mode: IslandMode, view: IslandView, islandW: CGFloat, islandH: 
     case .compact: return (40, resting.botCenterY, resting.botDiameter, 1)
     case .expanded:
         let layout = IslandConst.viewLayouts[view]!
+        // Toast: Mochi sits in the strip under the notch, whatever the notch height is
+        if view == .toast { return (layout.botX, islandH - 26, layout.botDiameter, 1) }
         let diameter = layout.botDiameter
         // Uploading: Mochi dot rides the leading edge of the progress fill.
         // Bar in island coords: left=36, width=526. cx = 36 + progress*526 (dot center at fill right edge).
@@ -392,18 +431,29 @@ struct CountdownBar: View {
                 .cornerRadius(2)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .onAppear { startTimer() }
-        .onDisappear { timer?.invalidate() }
+        // Only ticks while the island is open: folded, there is nothing to count down
+        .onAppear { if state.mode == .expanded { startTimer() } }
+        .onChange(of: state.mode) { _, mode in
+            if mode == .expanded { startTimer() } else { stopTimer() }
+        }
+        .onDisappear { stopTimer() }
     }
 
     private func startTimer() {
+        guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             updateBar()
         }
     }
 
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+        barWidth = 0
+    }
+
     private func updateBar() {
-        guard state.mode == .expanded && !state.isPinned else {
+        guard state.mode == .expanded && !state.isPinned && state.view != .toast else {
             barWidth = 0
             return
         }
@@ -431,32 +481,47 @@ struct IslandContentView: View {
                 .opacity(state.view == .confused ? 0 : 1)
                 .animation(.easeInOut(duration: 0.2), value: state.view == .confused)
 
+            // Only the view on screen is in the tree. Keeping all of them alive and transparent
+            // (as this used to) costs energy for nothing: their timelines keep ticking and every
+            // one of their glass panes is refreshed on each frame of any animation.
             ZStack {
                 ForEach(IslandView.allCases, id: \.self) { v in
-                    let active = state.view == v
-                    // Views that fill available height instead of the fixed 98pt content frame:
-                    // chat (prompt) is always flexible; mail is flexible only when active so
-                    // it doesn't push the ZStack taller when inactive.
-                    let isTall = v == .prompt || (v == .mail && active)
-                    let anim: Animation = active
-                        ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
-                        : .easeIn(duration: 0.16)
-                    IslandViewContent(view: v, state: state)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: isTall ? nil : 98)
-                        .frame(maxHeight: isTall ? .infinity : nil)
-                        .opacity(active ? 1 : 0)
-                        .scaleEffect(active ? 1 : 0.97)
-                        .allowsHitTesting(active)
-                        .animation(anim, value: state.view)
+                    if state.view == v {
+                        // Chat and mail fill the available height; the rest use the fixed 98pt frame
+                        let isTall = v == .prompt || v == .mail
+                        IslandViewContent(view: v, state: state)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: isTall ? nil : 98)
+                            .frame(maxHeight: isTall ? .infinity : nil)
+                            .transition(.asymmetric(
+                                insertion: .modifier(active: ViewSwap(shown: false), identity: ViewSwap(shown: true))
+                                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.16)),
+                                removal: .modifier(active: ViewSwap(shown: false), identity: ViewSwap(shown: true))
+                                    .animation(.easeIn(duration: 0.16))))
+                    }
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: state.view)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 10)
         }
         .padding(.top, 8)
         .padding(.bottom, 10)
         .foregroundColor(Color(hex: "#F5F6F8"))
+    }
+}
+
+/// How a view leaves and enters when the island switches views: it fades, shrinks a little and
+/// blurs out, then the next one settles in.
+private struct ViewSwap: ViewModifier {
+    let shown: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .scaleEffect(shown ? 1 : 0.96)
+            .blur(radius: shown ? 0 : 8)
+            .allowsHitTesting(shown)
     }
 }
 
@@ -483,8 +548,10 @@ struct IslandHeader: View {
 
             Spacer()
 
-            // Right: action icons
+            // Right: weather, then action icons
             HStack(spacing: 14) {
+                WeatherChip(state: state)
+                    .padding(.trailing, -4)
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         state.view = .settings
@@ -532,11 +599,16 @@ struct TabButton: View {
                 .font(.system(size: 13))
                 .foregroundColor(isOn ? Color(hex: "#F5F6F8") : (isHovered ? Color(hex: "#B0B5BE") : Color(hex: "#8E939C")))
                 .frame(width: 30, height: 22)
-                .background(
-                    isOn ? Color(hex: "#1D1F23") :
-                    isHovered ? Color.white.opacity(0.07) : Color.clear
-                )
-                .clipShape(Capsule())
+                .background {
+                    // The selected tab is a drop of glass; the others only tint on hover
+                    if isOn {
+                        Color.clear.liquidGlass(Capsule(), interactive: true, fallback: Color(hex: "#1D1F23"))
+                            .glassRim(Capsule(), strength: 0.6, lineWidth: 0.7)
+                    } else if isHovered {
+                        Capsule().fill(Color.white.opacity(0.07))
+                    }
+                }
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -556,7 +628,7 @@ struct CompactMiniGrid: View {
         let cols = [GridItem(.fixed(12), spacing: 4), GridItem(.fixed(12), spacing: 4)]
         LazyVGrid(columns: cols, spacing: 4) {
             ForEach(others) { task in
-                MiniBotCanvasView(task: task)
+                MiniBotCanvasView(task: task, folded: true)
                     .frame(width: 12 / 0.6, height: 12 / 0.6)
                     .frame(width: 12, height: 12, alignment: .center)
             }

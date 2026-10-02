@@ -157,6 +157,11 @@ final class ClaudeService {
     // MARK: - Chat (multi-turn, natural text + web search)
 
     func chat(query: String, context: PromptContext?, state: AppState) async {
+        // Preferred engine: the Claude Code CLI the user is already signed into (no API key).
+        if state.chatUsesClaudeCode, ClaudeCodeCLI.shared.isAvailable {
+            ClaudeCodeCLI.shared.send(query: query, context: context, state: state)
+            return
+        }
         guard let key = apiKey, !key.isEmpty else {
             await showError("API key missing. Open settings.", state: state)
             return

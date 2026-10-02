@@ -160,6 +160,10 @@ final class HookServer: @unchecked Sendable {
 
     @MainActor
     private func processEvent(name: String, payload: [String: Any]) {
+        // Sessions started by the notch chat report their progress in the chat itself;
+        // they must not hijack the Claude Code pill (only their approvals come through).
+        if payload["coucou_origin"] as? String == "notch" { return }
+
         let state = AppState.shared
         let sessionId = payload["session_id"] as? String ?? "unknown"
         let cwd = payload["cwd"] as? String ?? ""
@@ -179,10 +183,8 @@ final class HookServer: @unchecked Sendable {
         let isVSCode = termProgram.lowercased().contains("vscode") ||
                        bundleId.lowercased().contains("vscode")
         // External agents bypass the VS Code filter (their relay runs in any terminal).
-        guard isExternalAgent || isVSCode else {
-            nbLog("Ignored \(name) from \(termProgram.isEmpty ? bundleId : termProgram) (\(projectName))")
-            return
-        }
+        // Local patch: accept Claude Code sessions from any terminal, not only VS Code.
+        _ = isVSCode
 
         let focused = state.focusId == agentId
 
@@ -190,14 +192,14 @@ final class HookServer: @unchecked Sendable {
 
         case "SessionStart":
             activeSessionId = sessionId
-            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertTask(projectName: projectName, cwd: cwd) }
+            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertTask(projectName: projectName, cwd: cwd, payload: payload) }
             nbLog("SessionStart \(isExternalAgent ? agentId : projectName) (\(sessionId.prefix(8)))")
             if state.isPresent { expandIfNeeded(to: .overview) }
             SoundEngine.shared.play("work")
 
         case "UserPromptSubmit":
             activeSessionId = sessionId
-            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertTask(projectName: projectName, cwd: cwd) }
+            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertTask(projectName: projectName, cwd: cwd, payload: payload) }
             state.updateTask(id: agentId, state: .thinking)
             if let prompt = payload["prompt"] as? String, !prompt.isEmpty {
                 appendStep(id: agentId, step: String(prompt.prefix(60)))
@@ -206,7 +208,7 @@ final class HookServer: @unchecked Sendable {
 
         case "PreToolUse":
             activeSessionId = sessionId
-            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertTask(projectName: projectName, cwd: cwd) }
+            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertTask(projectName: projectName, cwd: cwd, payload: payload) }
             state.updateTask(id: agentId, state: .working)
             let tool = payload["tool_name"] as? String ?? "Tool"
             let input = payload["tool_input"] as? [String: Any] ?? [:]
@@ -230,6 +232,12 @@ final class HookServer: @unchecked Sendable {
             } else if message.hasSuffix("?") {
                 state.updateTask(id: agentId, state: .question)
                 appendStep(id: agentId, step: message)
+                banner(agentId, symbol: "questionmark", subtitle: message, accent: "#22D3EE")
+            } else if lower.contains("permission") || lower.contains("waiting for your input")
+                        || lower.contains("needs your") {
+                // Claude is blocked on the person in the terminal
+                banner(agentId, symbol: "hand.raised.fill", subtitle: message, accent: "#F5A524")
+                SoundEngine.shared.play("question")
             }
 
         case "Stop":
@@ -238,7 +246,11 @@ final class HookServer: @unchecked Sendable {
                 appendStep(id: agentId, step: String(message.prefix(60)))
             }
             SoundEngine.shared.play("finish")
-            if focused {
+            let lastWords = (payload["message"] as? String).map { String($0.prefix(80)) }
+            if banner(agentId, symbol: "checkmark", subtitle: lastWords ?? "Finished", accent: "#34D399") {
+                // Folded island: the banner says it, with a way back to the terminal
+                if !focused { setPillBadge(id: agentId, badge: .finished) }
+            } else if focused {
                 expandIfNeeded(to: .finished)
             } else {
                 setPillBadge(id: agentId, badge: .finished)
@@ -255,7 +267,9 @@ final class HookServer: @unchecked Sendable {
         case "StopFailure":
             state.updateTask(id: agentId, state: .error)
             SoundEngine.shared.play("error")
-            if focused {
+            if banner(agentId, symbol: "exclamationmark.triangle.fill", subtitle: "Stopped with an error", accent: "#F4505E") {
+                if !focused { setPillBadge(id: agentId, badge: .error) }
+            } else if focused {
                 expandIfNeeded(to: .error)
             } else {
                 setPillBadge(id: agentId, badge: .error)
@@ -279,6 +293,26 @@ final class HookServer: @unchecked Sendable {
         default:
             break
         }
+    }
+
+    // MARK: - Banners
+
+    /// While the island is folded, a session that finished or needs the person gets a banner under
+    /// the notch with a "Jump" button back to its terminal, instead of opening the whole island.
+    /// Returns false when no banner was shown (island already open, banners off, approval pending).
+    @MainActor
+    @discardableResult
+    private func banner(_ agentId: String, symbol: String, subtitle: String, accent: String) -> Bool {
+        let state = AppState.shared
+        guard state.claudeBanners, state.isPresent, state.pendingApproval == nil,
+              state.mode != .expanded || state.view == .toast,
+              let task = state.tasks.first(where: { $0.id == agentId }),
+              let controller = IslandWindowController.shared else { return false }
+        let hasTerminal = !(task.termProgram ?? "").isEmpty || !(task.termBundleId ?? "").isEmpty
+        controller.showToast(IslandToast(
+            symbol: symbol, title: task.name, subtitle: subtitle, accent: accent, focusId: agentId,
+            action: hasTerminal ? .jump(taskId: agentId) : nil), duration: 5.5)
+        return true
     }
 
     // MARK: - Agent validation + dynamic pill
@@ -366,18 +400,15 @@ final class HookServer: @unchecked Sendable {
         let bundleId    = payload["bundle_id"]    as? String ?? ""
         let isVSCode = termProgram.lowercased().contains("vscode") ||
                        bundleId.lowercased().contains("vscode")
-        guard isVSCode else {
-            Task.detached { [weak self] in
-                self?.sendLine(fd: fd, text: #"{"permissionDecision":"ask"}"#)
-                close(fd)
-            }
-            return
-        }
+        // Local patch: show approvals from any terminal, not only VS Code.
+        _ = isVSCode
 
         let tool = payload["tool_name"] as? String ?? "Tool"
         var command = tool
         if let input = payload["tool_input"] as? [String: Any] {
-            command = input["command"] as? String ?? tool
+            // Show what is actually being asked: the command, the file or the URL
+            let target = input["file_path"] as? String ?? input["path"] as? String ?? input["url"] as? String
+            command = input["command"] as? String ?? target.map { "\(tool) \($0)" } ?? tool
         }
         nbLog("PermissionRequest \(tool)")
 
@@ -392,8 +423,13 @@ final class HookServer: @unchecked Sendable {
         pendingApprovalFD = fd
         activeSessionId = sessionId
 
-        upsertTask(projectName: projectName, cwd: cwd)
-        state.updateTask(id: "integration_claude", state: .approval)
+        approvalFromNotch = payload["coucou_origin"] as? String == "notch"
+        if approvalFromNotch {
+            state.stateOverride = .approval
+        } else {
+            upsertTask(projectName: projectName, cwd: cwd, payload: payload)
+            state.updateTask(id: "integration_claude", state: .approval)
+        }
         state.pendingApproval = ApprovalInfo(sessionId: sessionId, tool: tool, command: command)
         state.isPinned = true
         SoundEngine.shared.play("approval")
@@ -434,6 +470,13 @@ final class HookServer: @unchecked Sendable {
         let state = AppState.shared
         state.pendingApproval = nil
         state.isPinned = false
+        if approvalFromNotch {
+            // Back to the chat that asked
+            approvalFromNotch = false
+            state.stateOverride = state.chatBusy ? .working : nil
+            state.view = .prompt
+            return
+        }
         state.updateTask(id: "integration_claude", state: .working)
         clearPillBadge(id: "integration_claude")
         state.view = state.tasks.isEmpty ? .empty : .overview
@@ -441,11 +484,16 @@ final class HookServer: @unchecked Sendable {
 
     /// Updates integration_claude with the current session project name and cwd.
     @MainActor
-    private func upsertTask(projectName: String, cwd: String = "") {
+    private func upsertTask(projectName: String, cwd: String = "", payload: [String: Any] = [:]) {
         let state = AppState.shared
         guard let idx = state.tasks.firstIndex(where: { $0.id == "integration_claude" }) else { return }
         state.tasks[idx].name = projectName
         if !cwd.isEmpty { state.tasks[idx].sessionCwd = cwd }
+        // Remember where the session lives so the notch can jump back to that exact window.
+        if let v = payload["term_program"] as? String, !v.isEmpty { state.tasks[idx].termProgram = v }
+        if let v = payload["bundle_id"] as? String, !v.isEmpty { state.tasks[idx].termBundleId = v }
+        if let v = payload["iterm_session_id"] as? String, !v.isEmpty { state.tasks[idx].termSessionId = v }
+        if let v = payload["tty"] as? String, !v.isEmpty { state.tasks[idx].termTTY = v }
     }
 
     // MARK: - Badge helpers
@@ -471,7 +519,7 @@ final class HookServer: @unchecked Sendable {
         guard let idx = state.tasks.firstIndex(where: { $0.id == "integration_claude" }) else { return }
         state.tasks[idx].steps = []
         state.tasks[idx].stepIndex = 0
-        state.tasks[idx].name = "VS Code"
+        state.tasks[idx].name = "Claude Code"
         state.tasks[idx].pillBadge = nil
     }
 
@@ -546,6 +594,9 @@ final class HookServer: @unchecked Sendable {
     }
 
     // MARK: - nb-hook script installation
+
+    /// The pending approval was requested by the notch chat (not a terminal session).
+    private var approvalFromNotch = false
 
     func installHookScript() {
         #if APPSTORE
@@ -1114,6 +1165,26 @@ def normalize_tool_fields(payload):
             if sid:
                 payload['session_id'] = sid
 
+def find_tty():
+    # Hooks run with piped stdio, so walk up the process tree to the first ancestor
+    # that still has a controlling terminal (Claude Code itself).
+    try:
+        import subprocess
+        pid = os.getpid()
+        for _ in range(6):
+            out = subprocess.run(['/bin/ps', '-o', 'tty=,ppid=', '-p', str(pid)],
+                                 capture_output=True, text=True, timeout=0.5).stdout.split()
+            if len(out) < 2:
+                return ''
+            if out[0] not in ('??', '-'):
+                return '/dev/' + out[0]
+            pid = int(out[1])
+            if pid <= 1:
+                return ''
+    except Exception:
+        pass
+    return ''
+
 def main():
     try:
         raw = sys.stdin.buffer.read()
@@ -1147,6 +1218,8 @@ def main():
     payload.setdefault('iterm_session_id', env.get('ITERM_SESSION_ID', ''))
     payload.setdefault('term_session_id', env.get('TERM_SESSION_ID', ''))
     payload.setdefault('bundle_id', env.get('__CFBundleIdentifier', ''))
+    if env.get('COUCOU_NOTCH'):
+        payload['coucou_origin'] = 'notch'  # session started by the notch chat
     if 'cwd' not in payload or not payload['cwd']:
         paths = payload.get('workspacePaths', [])
         if isinstance(paths, list) and paths:
@@ -1164,6 +1237,9 @@ def main():
         pass
 
     event = payload.get('hook_event_name', '')
+    # Only on the few events that (re)identify a session — keeps tool hooks instant.
+    if event in ('SessionStart', 'UserPromptSubmit') and not payload.get('tty'):
+        payload['tty'] = find_tty()
     socket_path = os.path.expanduser(
         '~/Library/Application Support/NotchBuddy/nb.sock'
     )

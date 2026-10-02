@@ -80,6 +80,24 @@ struct UploadCanvasView: View {
             .buttonStyle(.plain)
             .frame(width: 120, height: 26)
             .position(x: 290 + 60, y: 113 + 13)   // center = (350, 126)
+
+            // Tertiary: "Open shelf" — the file is already parked there
+            if state.activeIntegrations.contains("integration_shelf") {
+                Button {
+                    state.setFocus("integration_shelf")
+                    withAnimation(.easeInOut(duration: 0.22)) { state.view = .overview }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                        UploadSequenceEngine.shared.deactivate()
+                    }
+                } label: {
+                    Color.clear
+                        .frame(width: 96, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(width: 96, height: 26)
+                .position(x: 418 + 48, y: 113 + 13)   // center = (466, 126)
+            }
         }
         .opacity(f.chooseAlpha)
         .allowsHitTesting(f.chooseAlpha > 0.5)
@@ -91,7 +109,7 @@ struct UploadCanvasView: View {
         var c = ctx
 
         // ── Island background ──────────────────────────────────────
-        c.fill(Path(CGRect(x:0, y:0, width:640, height:176)), with: .color(Color.black))
+        // The island body behind this canvas is glass — nothing to paint here.
 
         // ── Card ──────────────────────────────────────────────────
         let cardPath = roundedRect(CGRect(x: USC.CARD_X, y: USC.CARD_Y, width: USC.CARD_W, height: USC.CARD_H), r: USC.CARD_R)
@@ -99,7 +117,7 @@ struct UploadCanvasView: View {
         var cardCtx = c
         cardCtx.clip(to: cardPath)
         cardCtx.fill(Path(CGRect(x: USC.CARD_X, y: USC.CARD_Y, width: USC.CARD_W, height: USC.CARD_H)),
-                     with: .color(Color(red:0.051, green:0.055, blue:0.063)))
+                     with: .color(Color.black.opacity(0.38)))
 
         // Green glow from card bottom — grows slowly with upload progress
         if f.greenWash > 0 {
@@ -268,7 +286,8 @@ struct UploadCanvasView: View {
             .foregroundColor(Color(hex:"#F5F6F8"))
         cCtx.draw(titleText, at: CGPoint(x:114, y:80), anchor: .leading)
 
-        let subText = Text("What do you want to do with it?")
+        let onShelf = state.activeIntegrations.contains("integration_shelf")
+        let subText = Text(onShelf ? "It's on your shelf. Anything else?" : "What do you want to do with it?")
             .font(.system(size:12.5))
             .foregroundColor(Color(hex:"#9398A1"))
         cCtx.draw(subText, at: CGPoint(x:114, y:100), anchor: .leading)
@@ -288,6 +307,16 @@ struct UploadCanvasView: View {
             .font(.system(size:12.5, weight:.medium))
             .foregroundColor(Color(hex:"#F1F2F4"))
         cCtx.draw(btn2, at: CGPoint(x:350, y:126), anchor: .center)
+
+        // Tertiary button (dim fill)
+        if onShelf {
+            cCtx.fill(roundedRect(CGRect(x:418,y:113,width:96,height:26), r:13),
+                      with: .color(Color.white.opacity(0.09)))
+            let btn3 = Text("Open shelf")
+                .font(.system(size:12.5, weight:.medium))
+                .foregroundColor(Color(hex:"#F1F2F4"))
+            cCtx.draw(btn3, at: CGPoint(x:466, y:126), anchor: .center)
+        }
     }
 
     // MARK: - Mochi (superellipse body + eyes + mouth)

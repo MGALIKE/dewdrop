@@ -66,7 +66,7 @@ targets:
         LSUIElement: YES
         NSHighResolutionCapable: YES
         NSSupportsAutomaticGraphicsSwitching: YES
-        NSAppleEventsUsageDescription: "Pour sauter au terminal et envoyer des mails."
+        NSAppleEventsUsageDescription: "Coucou jumps to your terminal tab, controls music playback and sends mails."
         NSAccessibilityUsageDescription: "Pour lire le titre de la fenêtre active et l'attacher comme contexte."
     settings:
       base:

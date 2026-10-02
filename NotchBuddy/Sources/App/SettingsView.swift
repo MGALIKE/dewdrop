@@ -80,6 +80,20 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
 
                 // MARK: API
+                GroupBox("Chat") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle("Chat through Claude Code (no API key)", isOn: $state.chatUsesClaudeCode)
+                            .disabled(!ClaudeCodeCLI.shared.isAvailable)
+                        Text(ClaudeCodeCLI.shared.isAvailable
+                             ? "Uses the Claude Code you are signed into: same account, same tools. Edits and commands still ask for your approval in the notch."
+                             : "Claude Code CLI not found. Install it, or use an Anthropic API key below.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(6)
+                }
+
                 GroupBox("Anthropic API") {
                     VStack(alignment: .leading, spacing: 8) {
                         SecureField("API key (sk-ant-…)", text: $apiKey)
@@ -386,11 +400,40 @@ struct SettingsView: View {
                     .padding(6)
                 }
 
+                // MARK: Dynamic Island
+                GroupBox("Dynamic Island") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Announce each new track under the notch", isOn: $state.announceTracks)
+                        Toggle("Show a banner when the charger is plugged in or the battery runs low", isOn: $state.announcePower)
+                        Toggle("Show volume and brightness as sliders under the notch", isOn: $state.hudEnabled)
+                        Toggle("Claude Code: a banner with a Jump button when a session finishes or needs you", isOn: $state.claudeBanners)
+                        Toggle("Keep the Mac awake while Claude Code is working", isOn: $state.keepAwakeAuto)
+                        HStack(spacing: 8) {
+                            Toggle("Weather for", isOn: $state.weatherEnabled)
+                                .onChange(of: state.weatherEnabled) { _, _ in WeatherMonitor.shared.settingsChanged() }
+                            TextField("City", text: $state.weatherCity)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 160)
+                                .disabled(!state.weatherEnabled)
+                                .onSubmit { WeatherMonitor.shared.settingsChanged() }
+                        }
+                        Text("Weather comes from Open-Meteo (no account). Only the city name and its coordinates are sent. Press Return after changing the city.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("While music plays or a timer runs, the folded island stays visible like a Live Activity.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(6)
+                }
+
                 // MARK: Active pills
                 GroupBox("Active pills") {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Text("VS Code")
+                            Text("Claude Code")
                                 .font(.system(size: 12, weight: .semibold))
                             Circle().fill(Color(hex: "#F5F6F8")).frame(width: 8, height: 8)
                             Spacer()
@@ -401,14 +444,14 @@ struct SettingsView: View {
 
                         Divider()
 
-                        Text("\(state.activeIntegrations.count)/4 slots used")
+                        Text("\(state.activeIntegrations.count)/\(AgentTask.maxActiveIntegrations) slots used")
                             .font(.system(size: 11))
-                            .foregroundColor(state.activeIntegrations.count >= 4 ? .orange : .secondary)
+                            .foregroundColor(state.activeIntegrations.count >= AgentTask.maxActiveIntegrations ? .orange : .secondary)
 
                         ForEach(AgentTask.toggleableIntegrationIds, id: \.self) { id in
                             let task = AgentTask.integrationAgents.first { $0.id == id }!
                             let isOn = state.activeIntegrations.contains(id)
-                            let atMax = state.activeIntegrations.count >= 4 && !isOn
+                            let atMax = state.activeIntegrations.count >= AgentTask.maxActiveIntegrations && !isOn
                             HStack(spacing: 8) {
                                 Circle()
                                     .fill(Color(hex: task.color))

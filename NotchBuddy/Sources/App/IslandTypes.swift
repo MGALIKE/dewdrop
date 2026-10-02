@@ -12,6 +12,7 @@ enum IslandView: String, CaseIterable {
     case overview, empty, approval, question, error, finished
     case confused, upload, uploading, choose, mail, prompt
     case searching, result, note, settings, greeting
+    case toast      // small Dynamic-Island banner under the notch (track change…)
 }
 
 // MARK: - Bot State
@@ -55,6 +56,11 @@ struct AgentTask: Identifiable, Equatable {
     var miniEye: EyeShape? = nil
     var pillBadge: PillBadge? = nil  // alert badge shown on pill when not focused
     var sessionCwd: String?  = nil  // last known working directory (Claude Code sessions)
+    // Where the Claude Code session lives — lets the notch jump back to the exact window/tab.
+    var termProgram: String?    = nil  // TERM_PROGRAM ("Apple_Terminal", "iTerm.app", "vscode", "ghostty"…)
+    var termBundleId: String?   = nil  // bundle id of the hosting app
+    var termSessionId: String?  = nil  // ITERM_SESSION_ID
+    var termTTY: String?        = nil  // /dev/ttysNNN
 }
 
 enum AgentSource: Equatable {
@@ -71,6 +77,7 @@ struct ViewLayout {
     let botY: CGFloat?         // nil = auto-centered
     let botDiameter: CGFloat
     let agentMode: AgentLayoutMode
+    var width: CGFloat? = nil  // nil = full expanded width
 }
 
 enum AgentLayoutMode {
@@ -108,6 +115,8 @@ enum IslandConst {
         .settings:  ViewLayout(height: 160, botX: 54,  botY: nil, botDiameter: 46, agentMode: .none),
         // Greeting: bot drawn by GreetingCanvasView; no BotPlacement needed
         .greeting:  ViewLayout(height: 150, botX: 320, botY: 90,  botDiameter: 0,  agentMode: .none),
+        // Toast: narrow banner; height and bot position follow the real notch (see islandSize / botPosition)
+        .toast:     ViewLayout(height: 84,  botX: 36,  botY: 58,  botDiameter: 30, agentMode: .none, width: 372),
     ]
 
     // Project colors — keyed by lowercase display name or slug
@@ -133,6 +142,12 @@ enum IslandConst {
         let color: String
     }
     static let allIntegrations: [IntegrationMeta] = [
+        .init(id: "integration_music",   name: "Music",   color: "#EC4899"),
+        .init(id: "integration_timer",   name: "Timer",   color: "#FACC15"),
+        .init(id: "integration_system",  name: "System",  color: "#22D3EE"),
+        .init(id: "integration_shelf",   name: "Shelf",   color: "#2DD4BF"),
+        .init(id: "integration_clipboard", name: "Clipboard", color: "#A78BFA"),
+        .init(id: "integration_notes",   name: "Notes",   color: "#FB923C"),
         .init(id: "integration_resend",  name: "Resend",  color: "#22C55E"),
         .init(id: "integration_n8n",     name: "n8n",     color: "#F29B38"),
         .init(id: "integration_vercel",  name: "Vercel",  color: "#7C5CFF"),

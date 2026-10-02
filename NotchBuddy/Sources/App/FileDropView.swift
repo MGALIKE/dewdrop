@@ -20,17 +20,26 @@ final class FileDropNSView: NSView {
     // Pass all mouse events through — drag-drop uses NSDraggingDestination, not hitTest
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    // A drag that started inside Coucou (a file leaving the shelf) is not an upload.
+    private func isOwnDrag(_ sender: NSDraggingInfo?) -> Bool { sender?.draggingSource != nil }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !isOwnDrag(sender) else { return [] }
         onDragEntered?(sender.draggingLocation)
         return .copy
     }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !isOwnDrag(sender) else { return [] }
         onDragUpdated?(sender.draggingLocation)
         return .copy
     }
-    override func draggingExited(_ sender: NSDraggingInfo?) { onDragExited?() }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard !isOwnDrag(sender) else { return }
+        onDragExited?()
+    }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard !isOwnDrag(sender) else { return false }
         guard let urls = sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]
@@ -47,6 +56,9 @@ enum FileDropHandler {
     static func handle(urls: [URL], state: AppState) async {
         guard let url = urls.first else { return }
         let name = url.lastPathComponent
+
+        // Every dropped file is parked on the shelf, whatever happens next
+        ShelfStore.shared.add(urls)
 
         // Start animation immediately — do NOT block on file copy.
         // Use original URL first; swap to inbox copy once background copy finishes.

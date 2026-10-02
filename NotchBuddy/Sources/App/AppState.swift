@@ -4,9 +4,15 @@ import Combine
 
 // Integration pills — always-present, never purged
 extension AgentTask {
-    /// All available integration pills. Claude is always active; others are opt-in (max 4).
+    /// All available integration pills. Claude is always active; others are opt-in (max 6).
     static let integrationAgents: [AgentTask] = [
-        AgentTask(id: "integration_claude",  name: "VS Code",   color: "#F5F6F8", state: .idle, steps: [], source: .claudeCode, isIntegration: true),
+        AgentTask(id: "integration_claude",  name: "Claude Code", color: "#F5F6F8", state: .idle, steps: [], source: .claudeCode, isIntegration: true),
+        AgentTask(id: "integration_music",   name: "Music",     color: "#EC4899", state: .idle, steps: [], source: .n8n, isIntegration: true),
+        AgentTask(id: "integration_timer",   name: "Timer",     color: "#FACC15", state: .idle, steps: [], source: .n8n, isIntegration: true),
+        AgentTask(id: "integration_system",  name: "System",    color: "#22D3EE", state: .idle, steps: [], source: .n8n, isIntegration: true),
+        AgentTask(id: "integration_shelf",   name: "Shelf",     color: "#2DD4BF", state: .idle, steps: [], source: .n8n, isIntegration: true),
+        AgentTask(id: "integration_clipboard", name: "Clipboard", color: "#A78BFA", state: .idle, steps: [], source: .n8n, isIntegration: true),
+        AgentTask(id: "integration_notes",   name: "Notes",     color: "#FB923C", state: .idle, steps: [], source: .n8n, isIntegration: true),
         AgentTask(id: "integration_resend",  name: "Resend",    color: "#22C55E", state: .idle, steps: [], source: .n8n, isIntegration: true),
         AgentTask(id: "integration_n8n",     name: "n8n",       color: "#F29B38", state: .idle, steps: [], source: .n8n, isIntegration: true),
         AgentTask(id: "integration_vercel",  name: "Vercel",    color: "#7C5CFF", state: .idle, steps: [], source: .n8n, isIntegration: true),
@@ -16,11 +22,20 @@ extension AgentTask {
         AgentTask(id: "integration_stripe",  name: "Stripe",    color: "#0570DE", state: .idle, steps: [], source: .n8n, isIntegration: true),
     ]
 
-    /// IDs that can be toggled (VS Code is always on and excluded from this list)
+    /// IDs that can be toggled (Claude Code is always on and excluded from this list)
     static let toggleableIntegrationIds: [String] = [
+        "integration_music", "integration_timer", "integration_system",
+        "integration_shelf", "integration_clipboard", "integration_notes",
         "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
         "integration_notion", "integration_calcom", "integration_stripe",
     ]
+
+    /// Local skills — no API key, always "configured".
+    static let skillIds: [String] = ["integration_music", "integration_timer", "integration_system",
+                                     "integration_shelf", "integration_clipboard", "integration_notes"]
+
+    /// Pill slots beside the focused card: 2 columns × 3 rows.
+    static let maxActiveIntegrations = 6
 
 }
 
@@ -58,6 +73,9 @@ final class AppState: ObservableObject {
 
     // Pinned (alerts that stay open, never auto-close)
     var isPinned: Bool = false
+
+    // What is typed in the chat field but not sent yet (the chat view comes and goes)
+    var chatDraft: String = ""
 
     // Upload progress (0-1) — set to 1.0 only at completion; animation is time-based
     @Published var uploadProgress: Double = 0
@@ -141,7 +159,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    // Active integration pills (VS Code excluded — always on). Max 4.
+    // Active integration pills (Claude Code excluded — always on). Max 6.
     @Published var activeIntegrations: Set<String> = ["integration_resend", "integration_n8n", "integration_vercel", "integration_github"] {
         didSet {
             if let data = try? JSONEncoder().encode(Array(activeIntegrations)) {
@@ -181,8 +199,70 @@ final class AppState: ObservableObject {
     @Published var notionLoaded: Bool = false
     @Published var notionError: String? = nil
 
+    // Music (populated by MusicMonitor)
+    @Published var nowPlaying: NowPlaying? = nil
+    @Published var musicAutomationDenied: Bool = false
+
+    // System (populated by SystemMonitor)
+    @Published var systemStats: SystemStats? = nil
+
+    // Timer & reminders (owned by TimerEngine)
+    @Published var countdowns: [Countdown] = []
+    @Published var pomodorosToday: Int = 0
+
+    // Dynamic-Island banner currently shown under the notch
+    @Published var toast: IslandToast? = nil
+    @Published var announceTracks: Bool = true {
+        didSet { UserDefaults.standard.set(announceTracks, forKey: "announceTracks") }
+    }
+
+    @Published var announcePower: Bool = true {
+        didSet { UserDefaults.standard.set(announcePower, forKey: "announcePower") }
+    }
+    @Published var hudEnabled: Bool = true {     // volume / brightness sliders under the notch
+        didSet { UserDefaults.standard.set(hudEnabled, forKey: "hudEnabled") }
+    }
+    @Published var claudeBanners: Bool = true {  // finished / needs-you banners instead of opening the island
+        didSet { UserDefaults.standard.set(claudeBanners, forKey: "claudeBanners") }
+    }
+    @Published var notes: [NoteItem] = []        // owned by NotesStore
+
+    // Weather (owned by WeatherMonitor)
+    @Published var weather: WeatherInfo? = nil
+    @Published var weatherEnabled: Bool = true {
+        didSet { UserDefaults.standard.set(weatherEnabled, forKey: "weatherEnabled") }
+    }
+    @Published var weatherCity: String = "" {
+        didSet { UserDefaults.standard.set(weatherCity, forKey: "weatherCity") }
+    }
+    @Published var showWeather: Bool = false     // the weather card takes the left pane
+    @Published var celebration: Int = 0          // bumped to throw confetti
+    var propsOverride: BotProps? = nil           // development: force Mochi's props
+
+    // Claude hub: plan usage and recent terminal sessions (populated by ClaudeHub)
+    @Published var claudeUsage: ClaudeUsage? = nil
+    @Published var claudeUsageRefreshing: Bool = false
+    @Published var claudeSessions: [ClaudeSession] = []
+
+    // Shelf (parked files) and clipboard history
+    @Published var shelf: [ShelfItem] = []
+    @Published var clips: [ClipItem] = []
+
+    // Keep the Mac awake (manual switch; `keepAwakeAuto` also holds it while Claude Code works)
+    @Published var keepAwake: Bool = false
+    @Published var keepAwakeAuto: Bool = false {
+        didSet { UserDefaults.standard.set(keepAwakeAuto, forKey: "keepAwakeAuto") }
+    }
+
     // Chat conversation history
     @Published var chatHistory: [ChatMessage] = []
+    @Published var chatBusy: Bool = false          // a reply is being generated
+    @Published var chatStatus: String? = nil       // "Reading AppState.swift"… while tools run
+
+    // Chat through the Claude Code CLI (the user's own login) instead of an API key — persisted
+    @Published var chatUsesClaudeCode: Bool = true {
+        didSet { UserDefaults.standard.set(chatUsesClaudeCode, forKey: "chatUsesClaudeCode") }
+    }
 
     // Pending approval request from Claude Code hook
     @Published var pendingApproval: ApprovalInfo? = nil
@@ -194,6 +274,14 @@ final class AppState: ObservableObject {
 
         if let v = ud.object(forKey: "soundEnabled") as? Bool   { soundEnabled = v }
         if let v = ud.object(forKey: "soundVolume")  as? Double { soundVolume  = v }
+        if let v = ud.object(forKey: "chatUsesClaudeCode") as? Bool { chatUsesClaudeCode = v }
+        if let v = ud.object(forKey: "announceTracks") as? Bool { announceTracks = v }
+        if let v = ud.object(forKey: "announcePower") as? Bool { announcePower = v }
+        if let v = ud.object(forKey: "hudEnabled") as? Bool { hudEnabled = v }
+        if let v = ud.object(forKey: "claudeBanners") as? Bool { claudeBanners = v }
+        if let v = ud.object(forKey: "weatherEnabled") as? Bool { weatherEnabled = v }
+        weatherCity = ud.string(forKey: "weatherCity") ?? ""
+        if let v = ud.object(forKey: "keepAwakeAuto") as? Bool { keepAwakeAuto = v }
         if let v = ud.string(forKey: "claudeModel"),
            !v.trimmingCharacters(in: .whitespaces).isEmpty { claudeModel = v }
         // Migrate old 60s default → 15s
@@ -212,6 +300,29 @@ final class AppState: ObservableObject {
         if let d = ud.data(forKey: "activeIntegrations"),
            let a = try? JSONDecoder().decode([String].self, from: d) { activeIntegrations = Set(a) }
 
+        // One-time: switch the local skills on, making room by dropping pills that have no key yet.
+        if !ud.bool(forKey: "skillPillsAdded2") {
+            ud.set(true, forKey: "skillPillsAdded2")
+            let keys = ["integration_resend": "resend-api-key", "integration_n8n": "n8n-api-key",
+                        "integration_vercel": "vercel-token", "integration_github": "github-token",
+                        "integration_notion": "notion-api-key", "integration_calcom": "calcom-api-key",
+                        "integration_stripe": "stripe-api-key"]
+            var active = activeIntegrations.union(AgentTask.skillIds)
+            for id in AgentTask.toggleableIntegrationIds.reversed() where active.count > AgentTask.maxActiveIntegrations {
+                if let key = keys[id], active.contains(id), KeychainStore.shared.get(key) == nil { active.remove(id) }
+            }
+            for id in AgentTask.toggleableIntegrationIds.reversed() where active.count > AgentTask.maxActiveIntegrations {
+                if !AgentTask.skillIds.contains(id) { active.remove(id) }
+            }
+            activeIntegrations = active
+        }
+
+        // One-time: switch the Notes pill on if there is a free slot.
+        if !ud.bool(forKey: "notesPillAdded") {
+            ud.set(true, forKey: "notesPillAdded")
+            if activeIntegrations.count < AgentTask.maxActiveIntegrations { activeIntegrations.insert("integration_notes") }
+        }
+
         // Sync SoundEngine volume on launch
         SoundEngine.shared.volume = Float(soundVolume)
 
@@ -227,6 +338,93 @@ final class AppState: ObservableObject {
 
     var effectiveState: BotState {
         stateOverride ?? focusTask?.state ?? .idle
+    }
+
+    // MARK: - Mochi mood (ambient, only while idle)
+
+    private var musicGrooving: Bool {
+        activeIntegrations.contains("integration_music") && nowPlaying?.isPlaying == true
+    }
+
+    /// Mood of the main Mochi. Real states (working, approval…) always win.
+    var botMood: BotMood {
+        guard effectiveState == .idle, mode != .expanded || view == .overview else { return .none }
+        if focusId == "integration_music" && musicGrooving { return .groove }
+        if activeIntegrations.contains("integration_system"), let s = systemStats {
+            if s.cpuHot { return .sweaty }
+            if s.batteryLow { return .sleepy }
+        }
+        return musicGrooving ? .groove : .none
+    }
+
+    /// What the main Mochi wears or holds right now.
+    var botProps: BotProps {
+        if let propsOverride { return propsOverride }
+        // Nothing while Mochi is a mailbox or a dot on the upload bar
+        if mode == .expanded && [.upload, .uploading, .choose, .greeting].contains(view) { return [] }
+        var props: BotProps = []
+        // What Claude Code is doing
+        switch effectiveState {
+        case .working:   props.insert(.laptop)
+        case .searching: props.insert(.magnifier)
+        case .error:     props.insert(.bandage)
+        default:         break
+        }
+        // Brightness slider pushed high: shades on
+        if mode == .expanded, view == .toast, let toast, toast.hud == .brightness, toast.level >= 0.85 {
+            props.insert(.sunglasses)
+        }
+        // Dressed for the weather whenever the island is open and nothing else is going on
+        if weatherEnabled, let weather, mode == .expanded, view == .overview, effectiveState == .idle {
+            switch weather.kind {
+            case .rain, .storm: props.formUnion([.umbrella, .rainfall])
+            case .snow:         props.formUnion([.scarf, .snowfall])
+            case .clear:        if weather.isDay && botMood != .sleepy && botMood != .sweaty { props.insert(.sunglasses) }
+            default:            break
+            }
+            if weather.isCold { props.insert(.scarf) }
+        }
+        if keepAwake && !props.contains(.laptop) { props.insert(.mug) }
+        if activeIntegrations.contains("integration_timer"), countdowns.contains(where: \.done) {
+            props.insert(.partyHat)
+        } else if musicGrooving {
+            props.insert(.headphones)
+        } else if effectiveState == .idle || effectiveState == .sleeping {
+            let hour = Calendar.current.component(.hour, from: Date())
+            if hour >= 23 || hour < 6 { props.insert(.nightcap) }
+        }
+        return props
+    }
+
+    /// Eyes suggested by the volume slider: shut when muted, wide when very loud.
+    var botEyeHint: EyeShape? {
+        guard mode == .expanded, view == .toast, let toast, toast.hud == .volume else { return nil }
+        if toast.muted || toast.level <= 0.001 { return .closed }
+        return toast.level >= 0.9 ? .wide : nil
+    }
+
+    /// Confetti over the open island.
+    func celebrate() { celebration += 1 }
+
+    /// Mood of a mini bot in a pill: each skill pill mirrors its own data.
+    func miniMood(for id: String) -> BotMood {
+        switch id {
+        case "integration_music":
+            return nowPlaying?.isPlaying == true ? .groove : .none
+        case "integration_system":
+            guard let s = systemStats else { return .none }
+            return s.cpuHot ? .sweaty : (s.batteryLow ? .sleepy : .none)
+        default:
+            return .none
+        }
+    }
+
+    /// Something is in progress that should keep the compact island on screen, like a Live Activity.
+    var hasLiveActivity: Bool {
+        if musicGrooving { return true }
+        if activeIntegrations.contains("integration_timer"),
+           countdowns.contains(where: { !$0.done && !$0.isPaused }) { return true }
+        return false
     }
 
     // MARK: - Task management
@@ -272,7 +470,7 @@ final class AppState: ObservableObject {
         else if view == .overview && tasks.isEmpty { view = .empty }
     }
 
-    /// Load integration pills respecting activeIntegrations. VS Code always loads. Safe to call multiple times.
+    /// Load integration pills respecting activeIntegrations. Claude Code always loads. Safe to call multiple times.
     func loadIntegrationTasks() {
         for task in AgentTask.integrationAgents {
             let shouldLoad = task.id == "integration_claude" || activeIntegrations.contains(task.id)
@@ -284,15 +482,16 @@ final class AppState: ObservableObject {
         syncMode()
     }
 
-    /// Toggle an integration pill on/off. VS Code cannot be toggled. Max 4 active at once.
+    /// Toggle an integration pill on/off. Claude Code cannot be toggled. Max 6 active at once.
     func toggleIntegration(_ id: String) {
         guard id != "integration_claude" else { return }
         if activeIntegrations.contains(id) {
             activeIntegrations.remove(id)
             tasks.removeAll { $0.id == id }
+            if id == "integration_timer" { TimerEngine.shared.cancelAll() }
             if focusId == id { focusId = "integration_claude" }
         } else {
-            guard activeIntegrations.count < 4 else { return }
+            guard activeIntegrations.count < AgentTask.maxActiveIntegrations else { return }
             activeIntegrations.insert(id)
             if let task = AgentTask.integrationAgents.first(where: { $0.id == id }),
                !tasks.contains(where: { $0.id == id }) {
@@ -448,5 +647,5 @@ enum ChatRole { case user, assistant }
 struct ChatMessage: Identifiable {
     let id = UUID()
     let role: ChatRole
-    let content: String
+    var content: String
 }

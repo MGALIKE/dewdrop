@@ -25,6 +25,7 @@ struct IslandViewContent: View {
         case .note:      NoteView(state: state)
         case .settings:  SettingsIslandView(state: state)
         case .greeting:  EmptyView()  // GreetingCanvasView overlaid in IslandRootView
+        case .toast:     EmptyView()  // IslandToastView drawn in IslandRootView
         }
     }
 }
@@ -44,9 +45,14 @@ struct OverviewView: View {
                 CardBackground(wash: nil)
 
                 // Title row + ticker stacked (or integration card)
-                if let agent = agent {
+                if state.showWeather, let weather = state.weather {
+                    WeatherCardView(weather: weather)
+                        .frame(width: 322, alignment: .topLeading)
+                        .transition(.opacity)
+                } else if let agent = agent {
                     if agent.isIntegration {
                         IntegrationCardView(task: agent, showingDetail: $showingN8nDetail)
+                            .frame(width: 322, alignment: .topLeading)
                     } else {
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(spacing: 6) {
@@ -67,14 +73,14 @@ struct OverviewView: View {
                                     }
                                 }())
                                     .font(.system(size: 11))
-                                    .foregroundColor(Color(hex: "#8E939C"))
+                                    .foregroundColor(.white.opacity(0.62))
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                 Spacer(minLength: 2)
                                 if agent.steps.count > 1 {
                                     Text("\(min(agent.stepIndex + 1, agent.steps.count))/\(agent.steps.count)")
                                         .font(.system(size: 11))
-                                        .foregroundColor(Color(hex: "#6B7079"))
+                                        .foregroundColor(.white.opacity(0.55))
                                         .fixedSize()
                                 }
                             }
@@ -94,7 +100,8 @@ struct OverviewView: View {
                 }
 
                 // ↗ jump button — last in ZStack so it renders on top; hidden while any detail is open
-                if !showingN8nDetail {
+                // (the Timer card has nowhere to jump to and uses that corner itself)
+                if !showingN8nDetail && !state.showWeather && !["integration_timer", "integration_shelf", "integration_clipboard", "integration_notes"].contains(agent?.id ?? "") {
                     Button(action: { openAgentTarget(agent) }) {
                         Image(systemName: "arrow.up.right")
                             .font(.system(size: 8, weight: .medium))
@@ -110,25 +117,28 @@ struct OverviewView: View {
                 }
             }
             .frame(width: 322)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
 
             // Right card: agent pills
             CardBackground(wash: nil) {
                 AgentPillsView(state: state)
             }
         }
-        .onChange(of: state.focusId) { _, _ in showingN8nDetail = false }
+        .onChange(of: state.focusId) { _, _ in
+            showingN8nDetail = false
+            state.showWeather = false
+        }
     }
 
     private func openAgentTarget(_ task: AgentTask?) {
         guard let task else { return }
         switch task.id {
         case "integration_claude":
-            let vscodeBundleId = "com.microsoft.VSCode"
-            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == vscodeBundleId }) {
-                app.activate(options: .activateIgnoringOtherApps)
-            } else {
-                NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Visual Studio Code.app"))
-            }
+            TerminalJumper.jump(to: task)
+        case "integration_music":
+            MusicMonitor.shared.openPlayer()
+        case "integration_system":
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"))
         case "integration_resend":
             NSWorkspace.shared.open(URL(string: "https://resend.com/emails")!)
         case "integration_vercel":
@@ -180,7 +190,7 @@ struct EmptyStateView: View {
                         .font(.system(size: 15, weight: .semibold))
                     Text("Drop a file or window, or ask me anything.")
                         .font(.system(size: 13))
-                        .foregroundColor(Color(hex: "#9398A1"))
+                        .foregroundColor(.white.opacity(0.66))
                 }
                 Spacer()
                 PrimaryButton("Ask Claude") {
@@ -295,13 +305,7 @@ struct FinishedView: View {
                 HStack(spacing: 8) {
                     #if !APPSTORE
                     PrimaryButton("Open terminal") {
-                        let terminalBundleIds = ["com.apple.Terminal", "com.googlecode.iterm2", "net.kovidgoyal.kitty", "com.mitchellh.ghostty"]
-                        let activated = terminalBundleIds.compactMap { id in
-                            NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == id }
-                        }.first.map { $0.activate(options: .activateIgnoringOtherApps) }
-                        if activated == nil {
-                            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"))
-                        }
+                        TerminalJumper.jump(to: state.tasks.first { $0.id == "integration_claude" })
                         NotificationCenter.default.post(name: .islandCollapse, object: nil)
                     }
                     #endif
@@ -327,7 +331,7 @@ struct ConfusedView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Too many hits at once.").font(.system(size: 15, weight: .semibold))
                 Text("Give me a sec — back to work in three seconds.")
-                    .font(.system(size: 13)).foregroundColor(Color(hex: "#9398A1"))
+                    .font(.system(size: 13)).foregroundColor(.white.opacity(0.66))
             }
             .padding(.leading, 128)
             .padding(.trailing, 18)
@@ -516,7 +520,7 @@ struct ChooseView: View {
             VStack(alignment: .leading, spacing: 8) {
                 let fileName = state.droppedFile?.name ?? "file"
                 (Text(fileName).font(.system(size: 14, weight: .semibold)) + Text(" is ready.").font(.system(size: 14, weight: .semibold)))
-                Text("What do you want to do with it?").font(.system(size: 12.5)).foregroundColor(Color(hex: "#9398A1"))
+                Text("What do you want to do with it?").font(.system(size: 12.5)).foregroundColor(.white.opacity(0.66))
                 HStack(spacing: 8) {
                     PrimaryButton("Ask a question") { state.view = .prompt }
                     SecondaryButton("Send by email") { state.view = .mail }
@@ -545,8 +549,8 @@ struct MailView: View {
                 HStack(spacing: 6) {
                     Text("New email").font(.system(size: 12, weight: .semibold))
                     if let name = state.droppedFile?.name {
-                        Text("with").font(.system(size: 12)).foregroundColor(Color(hex: "#8E939C"))
-                        Text(name).font(.system(size: 12)).foregroundColor(Color(hex: "#8E939C"))
+                        Text("with").font(.system(size: 12)).foregroundColor(.white.opacity(0.62))
+                        Text(name).font(.system(size: 12)).foregroundColor(.white.opacity(0.62))
                             .lineLimit(1).truncationMode(.middle)
                     }
                 }
@@ -734,9 +738,20 @@ struct PromptView: View {
                                 ForEach(state.chatHistory) { msg in
                                     ChatBubble(message: msg).id(msg.id)
                                 }
-                                if state.stateOverride != nil {
-                                    HStack { TypingDotsView(); Spacer(minLength: 32) }
-                                        .id("typing")
+                                if state.stateOverride != nil || state.chatBusy {
+                                    HStack(spacing: 6) {
+                                        TypingDotsView()
+                                        if let status = state.chatStatus {
+                                            Text(status)
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.white.opacity(0.55))
+                                                .lineLimit(1).truncationMode(.middle)
+                                                .transition(.opacity)
+                                        }
+                                        Spacer(minLength: 32)
+                                    }
+                                    .animation(.easeOut(duration: 0.2), value: state.chatStatus)
+                                    .id("typing")
                                 }
                             }
                             .padding(.vertical, 2)
@@ -748,6 +763,10 @@ struct PromptView: View {
                         }
                         .onChange(of: state.stateOverride) { _, v in
                             if v != nil { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+                        }
+                        // Streaming reply: keep the newest line in view as it grows
+                        .onChange(of: state.chatHistory.last?.content.count) { _, _ in
+                            proxy.scrollTo(state.chatBusy ? "typing" : state.chatHistory.last?.id as AnyHashable?, anchor: .bottom)
                         }
                         .onAppear {
                             if let last = state.chatHistory.last {
@@ -761,23 +780,45 @@ struct PromptView: View {
                 }
 
                 HStack(spacing: 8) {
-                    TextField(state.chatHistory.isEmpty ? "Ask me anything…" : "Continue…", text: $text)
+                    TextField("", text: $text,
+                              prompt: Text(placeholder).foregroundStyle(.white.opacity(0.55)))
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                         .focused($focused)
                         .onSubmit { sendMessage() }
 
-                    Button(action: sendMessage) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(Color(hex: "#0B0C0E"))
+                    if !state.chatHistory.isEmpty && !state.chatBusy {
+                        Button(action: newChat) {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.62))
+                                .frame(width: 24, height: 24)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("New chat")
                     }
-                    .buttonStyle(SendButtonStyle())
-                    .disabled(text.isEmpty)
+
+                    if state.chatBusy {
+                        Button(action: { ClaudeCodeCLI.shared.stop() }) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(Color(hex: "#0B0C0E"))
+                        }
+                        .buttonStyle(SendButtonStyle())
+                        .help("Stop")
+                    } else {
+                        Button(action: sendMessage) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(Color(hex: "#0B0C0E"))
+                        }
+                        .buttonStyle(SendButtonStyle())
+                        .disabled(text.isEmpty)
+                    }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.white.opacity(0.07))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .liquidGlass(RoundedRectangle(cornerRadius: 17, style: .continuous), fallback: Color.white.opacity(0.07))
                 .simultaneousGesture(TapGesture().onEnded { focused = true })
             }
             .padding(.leading, 84)
@@ -786,12 +827,36 @@ struct PromptView: View {
             .padding(.bottom, 14)
         }
         .padding(.bottom, 10)
-        .onAppear { focused = true }
+        .onAppear {
+            // The view is rebuilt each time the chat opens; pick the draft back up
+            text = state.chatDraft
+            focused = true
+        }
+        .onChange(of: text) { _, draft in state.chatDraft = draft }
+    }
+
+    private var usesClaudeCode: Bool { state.chatUsesClaudeCode && ClaudeCodeCLI.shared.isAvailable }
+
+    private var placeholder: String {
+        guard state.chatHistory.isEmpty else { return "Continue…" }
+        guard usesClaudeCode else { return "Ask me anything…" }
+        let folder = ClaudeCodeCLI.shared.workingDirectory
+        let isHome = folder.path == FileManager.default.homeDirectoryForCurrentUser.path
+        return isHome ? "Ask Claude Code…" : "Ask Claude Code in \(folder.lastPathComponent)…"
+    }
+
+    private func newChat() {
+        ClaudeCodeCLI.shared.newChat()
+        ClaudeService.shared.clearConversation()
+        state.chatHistory = []
+        state.promptContext = nil
+        focused = true
+        SoundEngine.shared.play("pop")
     }
 
     private func sendMessage() {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return }
+        guard !query.isEmpty, !state.chatBusy else { return }
         text = ""
         focused = false
         state.chatHistory.append(ChatMessage(role: .user, content: query))
@@ -817,12 +882,12 @@ struct ChatBubble: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Color.white.opacity(0.13))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .liquidGlass(RoundedRectangle(cornerRadius: 14, style: .continuous),
+                                 tint: Color(hex: "#6366F1").opacity(0.22), fallback: Color.white.opacity(0.13))
             } else {
-                Text(message.content)
+                Text(Self.rendered(message.content))
                     .font(.system(size: 12.5))
-                    .foregroundColor(Color(hex: "#B0B5BE"))
+                    .foregroundColor(.white.opacity(0.86))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 Spacer(minLength: 8)
@@ -831,24 +896,20 @@ struct ChatBubble: View {
     }
 }
 
-struct TypingDotsView: View {
-    @State private var phase = false
+extension ChatBubble {
+    /// Inline markdown (bold, `code`, links) with line breaks kept — Claude Code writes markdown.
+    static func rendered(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(text)
+    }
+}
 
+struct TypingDotsView: View {
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(Color(hex: "#6B7079"))
-                    .frame(width: 5, height: 5)
-                    .scaleEffect(phase ? 1.2 : 0.6)
-                    .animation(
-                        .easeInOut(duration: 0.45).repeatForever().delay(Double(i) * 0.14),
-                        value: phase
-                    )
-            }
-        }
-        .padding(.horizontal, 2).padding(.vertical, 4)
-        .onAppear { phase = true }
+        PulsingDots(count: 3, color: Color(hex: "#6B7079"), size: 5, scale: 0.6...1.2,
+                    duration: 0.45, stagger: 0.14)
+            .padding(.horizontal, 2).padding(.vertical, 4)
     }
 }
 
@@ -901,7 +962,7 @@ struct ResultView: View {
                             HStack {
                                 Text(item.label).font(.system(size: 12.5, weight: .semibold))
                                 Spacer()
-                                Text(item.detail).font(.system(size: 12.5)).foregroundColor(Color(hex: "#9398A1"))
+                                Text(item.detail).font(.system(size: 12.5)).foregroundColor(.white.opacity(0.66))
                             }
                             .padding(.horizontal, 10).padding(.vertical, 6)
                             .background(Color.white.opacity(0.05))
@@ -910,7 +971,7 @@ struct ResultView: View {
                     }
 
                     if let note = result.note {
-                        Text(note).font(.system(size: 11)).foregroundColor(Color(hex: "#6E737C"))
+                        Text(note).font(.system(size: 11)).foregroundColor(.white.opacity(0.55))
                     }
 
                     HStack(spacing: 8) {
@@ -1047,7 +1108,21 @@ struct IntegrationCardView: View {
     }
 
     var body: some View {
-        if showingDetail && n8nHasActivity {
+        if task.id == "integration_claude" && isConfigured {
+            ClaudeHubCard(task: task).transition(.opacity)
+        } else if task.id == "integration_shelf" {
+            ShelfCardView().transition(.opacity)
+        } else if task.id == "integration_clipboard" {
+            ClipboardCardView().transition(.opacity)
+        } else if task.id == "integration_notes" {
+            NotesCardView().transition(.opacity)
+        } else if task.id == "integration_music" {
+            MusicCardView().transition(.opacity)
+        } else if task.id == "integration_timer" {
+            TimerCardView().transition(.opacity)
+        } else if task.id == "integration_system" {
+            SystemCardView().transition(.opacity)
+        } else if showingDetail && n8nHasActivity {
             N8nDetailView(task: task) {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { showingDetail = false }
             }
@@ -1091,13 +1166,13 @@ struct IntegrationCardView: View {
                         .layoutPriority(1)
                     Text("Claude Code")
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "#8E939C"))
+                        .foregroundColor(.white.opacity(0.62))
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 2)
                     if task.steps.count > 1 {
                         Text("\(min(task.stepIndex + 1, task.steps.count))/\(task.steps.count)")
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "#6B7079"))
+                            .foregroundColor(.white.opacity(0.55))
                             .fixedSize()
                     }
                 }
@@ -1120,12 +1195,12 @@ struct IntegrationCardView: View {
                     Circle()
                         .fill(Color(hex: task.color))
                         .frame(width: 7, height: 7)
-                    Text(task.id == "integration_claude" ? "VS Code" : task.name)
+                    Text(task.id == "integration_claude" ? "Claude Code" : task.name)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(Color(hex: "#F5F6F8"))
                     Text("Integration")
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "#8E939C"))
+                        .foregroundColor(.white.opacity(0.62))
                     Spacer(minLength: 2)
                 }
                 .padding(.top, 6)
@@ -1139,21 +1214,21 @@ struct IntegrationCardView: View {
                     let dot = stripeErr != nil ? Color(hex: "#F4505E")
                             : isConfigured    ? Color(hex: "#22C55E")
                             :                   Color(hex: "#F4505E")
-                    let label = stripeErr ?? (isConfigured ? "Connected · loading…" : "Key not configured")
+                    let label = stripeErr ?? (task.id == "integration_claude"
+                        ? (isConfigured ? "Hooks installed · waiting for a session" : "Hooks not installed")
+                        : (isConfigured ? "Connected · loading…" : "Key not configured"))
                     Circle().fill(dot).frame(width: 5, height: 5)
                     Text(label)
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "#6B7079"))
+                        .foregroundColor(.white.opacity(0.55))
                 }
                 .padding(.leading, 108)
                 .padding(.top, 2)
 
                 HStack(spacing: 8) {
                     if task.id == "integration_claude" {
-                        Button("Open Visual Studio Code") { openVSCode() }
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: task.color).opacity(0.7))
-                            .buttonStyle(.plain)
+                        SkillChip(text: "Jump to \(TerminalJumper.hostName(for: task))", icon: "arrow.up.right",
+                                  color: Color(hex: task.color)) { TerminalJumper.jump(to: task) }
                     } else if n8nHasActivity {
                         // Clickable pill — tap to open execution detail
                         let success = task.state == .finished
@@ -1165,11 +1240,11 @@ struct IntegrationCardView: View {
                                 Circle().fill(accent).frame(width: 5, height: 5)
                                 Text(task.steps.first ?? "Workflow")
                                     .font(.system(size: 11))
-                                    .foregroundColor(Color(hex: "#C5C8CD"))
+                                    .foregroundColor(.white.opacity(0.88))
                                     .lineLimit(1).truncationMode(.tail)
                                 Image(systemName: "ellipsis")
                                     .font(.system(size: 8, weight: .medium))
-                                    .foregroundColor(Color(hex: "#6B7079"))
+                                    .foregroundColor(.white.opacity(0.55))
                             }
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(accent.opacity(0.1))
@@ -1202,7 +1277,7 @@ struct IntegrationCardView: View {
                             NotificationCenter.default.post(name: .openFullSettings, object: nil)
                         }
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "#8E939C"))
+                        .foregroundColor(.white.opacity(0.62))
                         .buttonStyle(.plain)
                     }
                 }
@@ -1261,7 +1336,7 @@ struct VercelDeploymentListView: View {
                     .foregroundColor(Color(hex: "#F5F6F8"))
                 Text("Deployments")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "#8E939C"))
+                    .foregroundColor(.white.opacity(0.62))
             }
             .padding(.top, 6)
             .padding(.leading, 108)
@@ -1276,16 +1351,16 @@ struct VercelDeploymentListView: View {
                         Circle().fill(accent).frame(width: 5, height: 5)
                         Text(first.projectName)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: "#C5C8CD"))
+                            .foregroundColor(.white.opacity(0.88))
                             .lineLimit(1).truncationMode(.tail)
                             .layoutPriority(1)
                         Text(first.timeAgo)
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "#6B7079"))
+                            .foregroundColor(.white.opacity(0.55))
                         Button(action: onOpenDetail) {
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 8, weight: .medium))
-                                .foregroundColor(Color(hex: "#6B7079"))
+                                .foregroundColor(.white.opacity(0.55))
                                 .frame(width: 18, height: 18)
                                 .contentShape(Rectangle())
                         }
@@ -1304,12 +1379,12 @@ struct VercelDeploymentListView: View {
                         Circle().fill(accent).frame(width: 5, height: 5)
                         Text(dep.projectName)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: "#9398A1"))
+                            .foregroundColor(.white.opacity(0.66))
                             .lineLimit(1).truncationMode(.tail)
                             .layoutPriority(1)
                         Text(dep.timeAgo)
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "#6B7079"))
+                            .foregroundColor(.white.opacity(0.55))
                     }
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1339,7 +1414,7 @@ struct VercelDetailView: View {
                 Button(action: onClose) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(Color(hex: "#6B7079"))
+                        .foregroundColor(.white.opacity(0.55))
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
@@ -1365,18 +1440,18 @@ struct VercelDetailView: View {
                 if let commit = deployment.commitMessage {
                     Text(commit)
                         .font(.system(size: 10.5))
-                        .foregroundColor(Color(hex: "#C5C8CD"))
+                        .foregroundColor(.white.opacity(0.88))
                         .lineLimit(2)
                 }
                 HStack(spacing: 8) {
                     if let branch = deployment.branch {
                         Label(branch, systemImage: "arrow.branch")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "#6B7079"))
+                            .foregroundColor(.white.opacity(0.55))
                     }
                     Text(deployment.timeAgo + " ago")
                         .font(.system(size: 10))
-                        .foregroundColor(Color(hex: "#6B7079"))
+                        .foregroundColor(.white.opacity(0.55))
                 }
                 Button(action: {
                     if let url = URL(string: "https://\(deployment.url)") {
@@ -1402,15 +1477,8 @@ struct VercelDetailView: View {
 // MARK: - Resend Card View
 
 struct ResendPulseDot: View {
-    @State private var on = false
     var body: some View {
-        Circle()
-            .fill(Color(hex: "#22C55E"))
-            .frame(width: 4, height: 4)
-            .opacity(on ? 1 : 0.2)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { on = true }
-            }
+        PulsingDots(color: Color(hex: "#22C55E"), size: 4, scale: 1...1, opacity: 0.2...1)
     }
 }
 
@@ -1430,12 +1498,12 @@ struct ResendCardView: View {
                     .foregroundColor(Color(hex: "#F5F6F8"))
                 Text("Emails")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "#8E939C"))
+                    .foregroundColor(.white.opacity(0.62))
                 if let total {
                     ResendPulseDot()
                     Text("\(total)")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Color(hex: "#C5C8CD"))
+                        .foregroundColor(.white.opacity(0.88))
                         .monospacedDigit()
                 }
             }
@@ -1451,12 +1519,12 @@ struct ResendCardView: View {
                         Circle().fill(accent).frame(width: 5, height: 5)
                         Text(first.recipientShort)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: "#C5C8CD"))
+                            .foregroundColor(.white.opacity(0.88))
                             .lineLimit(1).truncationMode(.tail)
                             .layoutPriority(1)
                         Text(first.timeAgo)
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "#6B7079"))
+                            .foregroundColor(.white.opacity(0.55))
                         if !first.subject.isEmpty {
                             Text(first.subject)
                                 .font(.system(size: 10))
@@ -1476,12 +1544,12 @@ struct ResendCardView: View {
                         Circle().fill(accent).frame(width: 5, height: 5)
                         Text(email.recipientShort)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: "#9398A1"))
+                            .foregroundColor(.white.opacity(0.66))
                             .lineLimit(1).truncationMode(.tail)
                             .layoutPriority(1)
                         Text(email.timeAgo)
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "#6B7079"))
+                            .foregroundColor(.white.opacity(0.55))
                     }
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1513,7 +1581,7 @@ struct GitHubStatsCardView: View {
                     .foregroundColor(Color(hex: "#F5F6F8"))
                 Text("Overview")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "#8E939C"))
+                    .foregroundColor(.white.opacity(0.62))
             }
             .padding(.top, 6)
             .padding(.leading, 108)
@@ -1554,11 +1622,11 @@ private struct StatRow: View {
                 .frame(width: 14)
             Text(label)
                 .font(.system(size: 11))
-                .foregroundColor(Color(hex: "#6B7079"))
+                .foregroundColor(.white.opacity(0.55))
             Spacer()
             Text(value)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Color(hex: "#C5C8CD"))
+                .foregroundColor(.white.opacity(0.88))
                 .monospacedDigit()
         }
         .frame(maxWidth: .infinity)
@@ -1582,7 +1650,7 @@ struct StripeCardView: View {
                     .foregroundColor(Color(hex: "#F5F6F8"))
                 Text("Payments")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "#8E939C"))
+                    .foregroundColor(.white.opacity(0.62))
             }
             .padding(.top, 6)
             .padding(.leading, 108)
@@ -1597,7 +1665,7 @@ struct StripeCardView: View {
                     .animation(.easeOut(duration: 1.2), value: appState.stripeDisplayBalance)
                 Text(appState.stripeCurrency.uppercased())
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(Color(hex: "#6B7079"))
+                    .foregroundColor(.white.opacity(0.55))
                     .padding(.bottom, 1)
             }
             .padding(.leading, 108)
@@ -1637,7 +1705,7 @@ private struct StripePaymentRow: View {
             Circle().fill(accent).frame(width: 5, height: 5)
             Text(payment.description ?? "Payment")
                 .font(.system(size: 11))
-                .foregroundColor(Color(hex: "#C5C8CD"))
+                .foregroundColor(.white.opacity(0.88))
                 .lineLimit(1).truncationMode(.tail)
                 .layoutPriority(1)
             Spacer(minLength: 4)
@@ -1647,7 +1715,7 @@ private struct StripePaymentRow: View {
                 .fixedSize()
             Text(payment.timeAgo)
                 .font(.system(size: 10))
-                .foregroundColor(Color(hex: "#6B7079"))
+                .foregroundColor(.white.opacity(0.55))
                 .fixedSize()
         }
         .frame(maxWidth: .infinity)
@@ -1765,20 +1833,20 @@ struct CalcomCalendarView: View {
             HStack(spacing: 6) {
                 Circle().fill(Color(hex: "#C9956A")).frame(width: 7, height: 7)
                 Text("Cal.com").font(.system(size: 12, weight: .semibold)).foregroundColor(Color(hex: "#F5F6F8"))
-                Text("Schedule").font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C"))
+                Text("Schedule").font(.system(size: 11)).foregroundColor(.white.opacity(0.62))
             }
             .padding(.top, 6).padding(.leading, 108).padding(.trailing, 36)
 
             HStack(spacing: 0) {
                 Button { goBack() } label: {
                     Image(systemName: "chevron.left").font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(Color(hex: "#6B7079")).frame(width: 18, height: 16)
+                        .foregroundColor(.white.opacity(0.55)).frame(width: 18, height: 16)
                 }.buttonStyle(.plain)
                 Text(navLabel).font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color(hex: "#C5C8CD")).frame(maxWidth: .infinity)
+                    .foregroundColor(.white.opacity(0.88)).frame(maxWidth: .infinity)
                 Button { goForward() } label: {
                     Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(Color(hex: "#6B7079")).frame(width: 18, height: 16)
+                        .foregroundColor(.white.opacity(0.55)).frame(width: 18, height: 16)
                 }.buttonStyle(.plain)
             }
             .padding(.leading, 108).padding(.trailing, 12).padding(.top, 2)
@@ -1853,15 +1921,15 @@ struct CalcomDayView: View {
             HStack(spacing: 4) {
                 Button(action: onBack) {
                     Image(systemName: "chevron.left").font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(Color(hex: "#6B7079")).frame(width: 22, height: 22).contentShape(Rectangle())
+                        .foregroundColor(.white.opacity(0.55)).frame(width: 22, height: 22).contentShape(Rectangle())
                 }.buttonStyle(.plain).padding(.leading, 108)
-                Text(dayLabel).font(.system(size: 11, weight: .semibold)).foregroundColor(Color(hex: "#C5C8CD"))
+                Text(dayLabel).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.88))
                 Spacer()
             }
             .padding(.top, 6).padding(.trailing, 12)
 
             if bookings.isEmpty {
-                Text("No calls scheduled").font(.system(size: 11)).foregroundColor(Color(hex: "#6B7079"))
+                Text("No calls scheduled").font(.system(size: 11)).foregroundColor(.white.opacity(0.55))
                     .padding(.leading, 116).padding(.top, 8)
             } else {
                 VStack(alignment: .leading, spacing: 3) {
@@ -1872,7 +1940,7 @@ struct CalcomDayView: View {
                                 Text(b.timeLabel)
                                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                                     .foregroundColor(Color(hex: "#C9956A")).fixedSize()
-                                Text(b.title).font(.system(size: 11)).foregroundColor(Color(hex: "#C5C8CD"))
+                                Text(b.title).font(.system(size: 11)).foregroundColor(.white.opacity(0.88))
                                     .lineLimit(1).truncationMode(.tail).layoutPriority(1)
                                 Spacer(minLength: 2)
                                 Image(systemName: "chevron.right").font(.system(size: 8))
@@ -1904,7 +1972,7 @@ struct CalcomBookingDetailView: View {
             HStack(spacing: 4) {
                 Button(action: onBack) {
                     Image(systemName: "chevron.left").font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(Color(hex: "#6B7079")).frame(width: 22, height: 22).contentShape(Rectangle())
+                        .foregroundColor(.white.opacity(0.55)).frame(width: 22, height: 22).contentShape(Rectangle())
                 }.buttonStyle(.plain).padding(.leading, 108)
                 Text(booking.timeLabel)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -1941,8 +2009,8 @@ private struct CalcomDetailRow: View {
     var lines: Int = 1
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
-            Image(systemName: icon).font(.system(size: 9)).foregroundColor(Color(hex: "#6B7079")).frame(width: 10)
-            Text(text).font(.system(size: size)).foregroundColor(Color(hex: "#9398A1"))
+            Image(systemName: icon).font(.system(size: 9)).foregroundColor(.white.opacity(0.55)).frame(width: 10)
+            Text(text).font(.system(size: size)).foregroundColor(.white.opacity(0.66))
                 .lineLimit(lines).truncationMode(truncate ? .middle : .tail)
         }
     }
@@ -1958,7 +2026,7 @@ struct NotionCardView: View {
             HStack(spacing: 6) {
                 Circle().fill(Color(hex: "#E8E8E8")).frame(width: 7, height: 7)
                 Text("Notion").font(.system(size: 12, weight: .semibold)).foregroundColor(Color(hex: "#F5F6F8"))
-                Text("Recent").font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C"))
+                Text("Recent").font(.system(size: 11)).foregroundColor(.white.opacity(0.62))
             }
             .padding(.top, 6).padding(.leading, 108).padding(.trailing, 36)
 
@@ -1972,10 +2040,10 @@ struct NotionCardView: View {
                                 Text(emoji).font(.system(size: 10)).frame(width: 14)
                             } else {
                                 Image(systemName: "doc.text").font(.system(size: 9))
-                                    .foregroundColor(Color(hex: "#6B7079")).frame(width: 14)
+                                    .foregroundColor(.white.opacity(0.55)).frame(width: 14)
                             }
                             Text(page.title).font(.system(size: 11))
-                                .foregroundColor(Color(hex: "#C5C8CD"))
+                                .foregroundColor(.white.opacity(0.88))
                                 .lineLimit(1).truncationMode(.tail).layoutPriority(1)
                             Spacer(minLength: 4)
                             Text(page.timeAgo).font(.system(size: 9))
@@ -2013,7 +2081,7 @@ struct N8nDetailView: View {
                 Button(action: onClose) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(Color(hex: "#6B7079"))
+                        .foregroundColor(.white.opacity(0.55))
                         .frame(width: 28, height: 28)   // large hit area
                         .contentShape(Rectangle())
                 }
@@ -2042,7 +2110,7 @@ struct N8nDetailView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     Text(detail)
                         .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundColor(Color(hex: "#9398A1"))
+                        .foregroundColor(.white.opacity(0.66))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .lineSpacing(2)
                         .textSelection(.enabled)
@@ -2051,7 +2119,7 @@ struct N8nDetailView: View {
             } else {
                 Text(success ? "Completed successfully." : "No error details available.")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "#6B7079"))
+                    .foregroundColor(.white.opacity(0.55))
             }
         }
         .padding(.top, 8)
@@ -2104,7 +2172,7 @@ struct TickerView: View {
                 .offset(x: -rowBPhase * 10, y: rowBOffset)
 
             // Row C: incoming new step — slides in from below at phase=0
-            TickerRowView(text: rowC, phase: 0.0)
+            TickerRowView(text: rowC, phase: 0.0, live: isTransitioning)
                 .offset(y: rowCOffset)
                 .opacity(rowCOpacity)
         }
@@ -2183,6 +2251,7 @@ struct TickerView: View {
 struct TickerRowView: View {
     let text: String
     let phase: Double   // 0 = current (shimmer, large), 1 = completed (dim, scaled down by caller)
+    var live = true     // false while the row is waiting off screen: no shimmer to animate
 
     var body: some View {
         HStack(spacing: 6) {
@@ -2190,7 +2259,7 @@ struct TickerRowView: View {
             ZStack {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(Color(hex: "#8E939C"))
+                    .foregroundColor(.white.opacity(0.62))
                     .opacity(max(0, 1 - phase * 2))
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .regular))
@@ -2201,11 +2270,13 @@ struct TickerRowView: View {
 
             // Text: shimmer fades out, dim completed text fades in (overlapping cross-fade)
             ZStack(alignment: .leading) {
-                TickerShimmerText(text: text)
-                    .opacity(max(0, 1 - phase * 1.6))
+                if live && phase < 0.625 {
+                    TickerShimmerText(text: text)
+                        .opacity(max(0, 1 - phase * 1.6))
+                }
                 Text(text)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color(hex: "#6B7079"))
+                    .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1).truncationMode(.tail)
                     .opacity(min(1, max(0, phase * 2 - 0.4)))
             }
@@ -2217,23 +2288,37 @@ struct TickerRowView: View {
 
 struct TickerShimmerText: View {
     let text: String
+    @ObservedObject private var motion = IslandMotion.shared
 
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
-            let p = CGFloat(t.truncatingRemainder(dividingBy: 2.2) / 2.2)
-            // phase sweeps -0.1 → 1.1 so white peak enters from left and exits right
-            let phase = p * 1.2 - 0.1
-            Text(text)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(LinearGradient(stops: [
-                    .init(color: Color(hex: "#7c818a"), location: max(0, phase - 0.3)),
-                    .init(color: Color(hex: "#F2F3F5"), location: max(0, min(1, phase))),
-                    .init(color: Color(hex: "#7c818a"), location: min(1, phase + 0.3)),
-                ], startPoint: .leading, endPoint: .trailing))
-        }
+        // The text is laid out once and a band of light slides across it, 30 times a second,
+        // while the pointer is on the island; with the pointer away it is plain text.
+        // (Rebuilding the text with a new gradient on every display frame kept the whole island
+        // re-laying itself out 120 times a second while an agent was working.)
+        let label = Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+        label
+            .foregroundStyle(Color(hex: motion.lively ? "#7c818a" : "#A9ADB5"))
+            .overlay {
+                if motion.lively {
+                    GeometryReader { geo in
+                        TimelineView(.beat(30)) { tl in
+                            let t = tl.date.timeIntervalSinceReferenceDate
+                            let p = CGFloat(t.truncatingRemainder(dividingBy: 2.2) / 2.2)
+                            // sweeps -0.1 → 1.1 so the light enters from the left and exits right
+                            let phase = p * 1.2 - 0.1
+                            LinearGradient(colors: [.clear, Color(hex: "#F2F3F5"), .clear],
+                                           startPoint: .leading, endPoint: .trailing)
+                                .frame(width: geo.size.width * 0.6)
+                                .offset(x: (phase - 0.3) * geo.size.width)
+                        }
+                    }
+                    .mask(label)
+                    .allowsHitTesting(false)
+                }
+            }
     }
 }
 
@@ -2242,13 +2327,14 @@ struct TickerShimmerText: View {
 struct AgentPillsView: View {
     @ObservedObject var state: AppState
     @State private var swapping = false
+    @State private var visibleCount = 0
 
     private var others: [AgentTask] {
         state.tasks.filter { $0.id != state.focusId }
     }
 
     private var displayTasks: [AgentTask] {
-        Array(others.prefix(4))
+        Array(others.prefix(6))   // 2 columns × 3 rows
     }
 
     private let columns = [
@@ -2259,20 +2345,39 @@ struct AgentPillsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
-            LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(displayTasks) { task in
-                    AgentPill(task: task, state: state, swapping: $swapping) {
-                        swapping = true
-                        state.setFocus(task.id)
-                        SoundEngine.shared.play("blip")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { swapping = false }
+            LiquidGroup(spacing: 6) {
+                LazyVGrid(columns: columns, spacing: 4) {
+                    ForEach(Array(displayTasks.enumerated()), id: \.element.id) { index, task in
+                        if index < visibleCount {
+                            AgentPill(task: task, state: state, swapping: $swapping) {
+                                swapping = true
+                                state.setFocus(task.id)
+                                SoundEngine.shared.play("blip")
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { swapping = false }
+                            }
+                            .transition(.scale(scale: 0.7).combined(with: .opacity))
+                        } else {
+                            Color.clear.frame(height: 27)      // holds the slot until the pill pops in
+                        }
                     }
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 9)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear(perform: cascade)
+    }
+
+    /// The pills pop in one after another instead of all on the opening frame: it reads as a
+    /// little cascade, and it spreads the cost of building six glass pills over several frames.
+    private func cascade() {
+        guard visibleCount == 0 else { return }
+        for index in 0..<6 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06 + Double(index) * 0.035) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.68)) { visibleCount = max(visibleCount, index + 1) }
+            }
+        }
     }
 }
 
@@ -2283,21 +2388,15 @@ struct AgentPill: View {
     let onTap: () -> Void
     @State private var isHovered = false
 
-    // VS Code pill always shows "VS Code" label regardless of active project name
+    // Claude Code pill always shows "Claude Code" label regardless of active project name
     private var displayName: String {
-        task.id == "integration_claude" ? "VS Code" : task.name
+        task.id == "integration_claude" ? "Claude Code" : task.name
     }
 
     var body: some View {
         Button(action: { onTap() }) {
             ZStack(alignment: .topTrailing) {
                 ZStack {
-                    Capsule()
-                        .fill(isHovered
-                              ? Color(hex: task.color).opacity(0.18)
-                              : Color(hex: "#0E0F11"))
-                    Capsule()
-                        .stroke(Color(hex: task.color).opacity(isHovered ? 0.55 : 0.14), lineWidth: 1)
                     HStack(spacing: 0) {
                         MiniBotCanvasView(task: task)
                             .frame(width: 22 / 0.6, height: 22 / 0.6)
@@ -2309,13 +2408,19 @@ struct AgentPill: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(isHovered
                                          ? Color(hex: task.color).lighter(by: 0.3)
-                                         : Color(hex: "#6B7079"))
+                                         : Color.white.opacity(0.82))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .padding(.leading, 30).padding(.trailing, 10)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 28)
+                .frame(height: 27)
+                // Glass goes on the content itself so the bot and label stay on top of it
+                .liquidGlass(Capsule(), tint: Color(hex: task.color).opacity(isHovered ? 0.36 : 0.10),
+                             interactive: true, fallback: Color(hex: "#0E0F11"))
+                .glassRim(Capsule(), strength: isHovered ? 1 : 0.6, lineWidth: 0.7)
+                .contentShape(Capsule())
                 .shadow(color: Color(hex: task.color).opacity(isHovered ? 0.35 : 0), radius: 10, x: 0, y: 2)
 
                 // Alert badge (approval / finished / error)
@@ -2421,24 +2526,7 @@ struct CardBackground<Content: View>: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(hex: "#141518"))
-                .overlay(
-                    RadialGradient(
-                        gradient: Gradient(stops: [
-                            .init(color: washColor, location: 0),
-                            .init(color: .clear, location: 0.7)
-                        ]),
-                        center: UnitPoint(x: 0.5, y: 1.3),
-                        startRadius: 0,
-                        endRadius: 280
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(0.035), lineWidth: 1)
-                )
+            LiquidCard(wash: washColor)
 
             if let content = content {
                 content()
@@ -2455,24 +2543,7 @@ extension CardBackground where Content == EmptyView {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(hex: "#141518"))
-                .overlay(
-                    RadialGradient(
-                        gradient: Gradient(stops: [
-                            .init(color: washColor, location: 0),
-                            .init(color: .clear, location: 0.7)
-                        ]),
-                        center: UnitPoint(x: 0.5, y: 1.3),
-                        startRadius: 0,
-                        endRadius: 280
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(0.035), lineWidth: 1)
-                )
+            LiquidCard(wash: washColor)
         }
     }
 }
@@ -2489,7 +2560,7 @@ struct AgentWho: View {
                 Circle().fill(Color(hex: task.color)).frame(width: 8, height: 8)
                 Text(task.name).font(.system(size: 12, weight: .semibold)).foregroundColor(Color(hex: "#F5F6F8"))
             }
-            Text(label).font(.system(size: 12)).foregroundColor(Color(hex: "#8E939C"))
+            Text(label).font(.system(size: 12)).foregroundColor(.white.opacity(0.62))
         }
     }
 }
@@ -2553,7 +2624,7 @@ struct MailField: View {
         HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 12.5))
-                .foregroundColor(Color(hex: "#80858E"))
+                .foregroundColor(.white.opacity(0.6))
                 .frame(width: 44, alignment: .leading)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
@@ -2660,9 +2731,9 @@ struct SecondaryButton: View {
                 }
             }
             .padding(.horizontal, 13).padding(.vertical, 7)
-            .background(Color.white.opacity(0.09))
             .foregroundColor(Color(hex: "#F1F2F4"))
-            .clipShape(Capsule())
+            .liquidGlass(Capsule(), interactive: true, fallback: Color.white.opacity(0.09))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -2724,7 +2795,7 @@ struct SettingsIslandView: View {
                         .frame(width: 44)
                     Text("Sound")
                         .font(.system(size: 12.5))
-                        .foregroundColor(Color(hex: "#C5C8CD"))
+                        .foregroundColor(.white.opacity(0.88))
                     Slider(value: $state.soundVolume, in: 0...0.2)
                         .frame(width: 72)
                         .opacity(state.soundEnabled ? 1 : 0.4)
@@ -2734,11 +2805,11 @@ struct SettingsIslandView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "timer")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "#8E939C"))
+                        .foregroundColor(.white.opacity(0.62))
                         .frame(width: 16)
                     Text("Auto-close · \(Int(state.autoCloseInterval))s")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "#C5C8CD"))
+                        .foregroundColor(.white.opacity(0.88))
                     Spacer()
                     HStack(spacing: 6) {
                         ForEach([10, 15, 30], id: \.self) { s in
@@ -2764,7 +2835,7 @@ struct SettingsIslandView: View {
                         NotificationCenter.default.post(name: .openFullSettings, object: nil)
                     }
                     .font(.system(size: 11.5))
-                    .foregroundColor(Color(hex: "#8E939C"))
+                    .foregroundColor(.white.opacity(0.62))
                     .buttonStyle(.plain)
                 }
             }
@@ -2786,7 +2857,7 @@ struct StatusBadge: View {
                 .frame(width: 6, height: 6)
             Text(label)
                 .font(.system(size: 11))
-                .foregroundColor(Color(hex: "#8E939C"))
+                .foregroundColor(.white.opacity(0.62))
         }
     }
 }
