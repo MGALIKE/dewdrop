@@ -189,4 +189,4 @@ Dewdrop started as a fork of **Coucou** by [Louis Raillé](https://louisraille.f
 - **The names "Coucou" and "Mochi", the Mochi character, the original icon, sounds and media** are © Louis Raillé, all rights reserved ([LICENSE-ASSETS.md](LICENSE-ASSETS.md)) and are no longer in this repository.
 - **Dew, the Dewdrop icon, the sounds and the images here** are this fork's own and come under the same MIT licence as the code.
 
-Built with [Claude Code](https://claude.com/claude-code).
+Built with Love <3
