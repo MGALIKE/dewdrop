@@ -2,15 +2,15 @@
 
 (The hook relay, its socket and the payload fields keep the names they had in Coucou — `nb-hook`, `coucou_agent`, `coucou_origin` — so agents written for either app work with both.)
 
-Any tool that can write to a Unix domain socket (macOS) or a named pipe (Windows) can send events to Dewdrop and have its own pill next to Claude Code.
+Any tool that can write to a Unix domain socket can send events to Dewdrop and have its own pill next to Claude Code.
 
 ## The `coucou_agent` field
 
-Add the optional field `coucou_agent` to any hook JSON payload. Coucou will create a pill labelled with the agent name and route all events to it.
+Add the optional field `coucou_agent` to any hook JSON payload. Dewdrop creates a pill labelled with the agent name and routes all of that agent's events to it.
 
 **Validation:** the name must match `^[a-z0-9-]{1,24}$` (lowercase letters, digits and hyphens, 1–24 characters). An absent or invalid name routes the event to the Claude Code pill instead.
 
-## Hook command (macOS)
+## Hook command
 
 Configure your tool to call the Dewdrop relay with `--agent <your-name>` after the hook executable:
 
@@ -24,21 +24,7 @@ Configure your tool to call the Dewdrop relay with `--agent <your-name>` after t
 }
 ```
 
-The shell wrapper passes `"$@"` to the Python relay, which extracts the agent name and injects it into the payload before forwarding to Coucou.
-
-## Hook command (Windows)
-
-Same pattern with the Windows relay:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      { "type": "command", "command": "C:\\path\\to\\coucou-hook.exe --agent my-tool" }
-    ]
-  }
-}
-```
+The shell wrapper passes `"$@"` to the Python relay, which extracts the agent name and injects it into the payload before forwarding to Dewdrop.
 
 ## Payload format
 
@@ -53,10 +39,7 @@ The relay adds `coucou_agent` to the JSON it forwards. You can also add it yours
 }
 ```
 
-Send newline-terminated JSON to the socket:
-- **macOS (GitHub build):** `~/Library/Application Support/NotchBuddy/nb.sock`
-- **macOS (App Store build):** `~/Library/Containers/fr.louisraille.Coucou/Data/nb.sock`
-- **Windows:** `\\.\pipe\coucou-<user-SID>`
+Send newline-terminated JSON to the socket: `~/Library/Application Support/NotchBuddy/nb.sock` (same user only; 1 MiB and 5 s per message).
 
 ## Supported events
 
@@ -64,7 +47,7 @@ All standard Claude Code hook events are supported, **except `PermissionRequest`
 approval cards are not yet implemented for third-party agents (only Claude Code gets
 one). A `PermissionRequest` from an external agent is answered immediately with no
 decision, so the relay writes nothing and the agent re-asks in its terminal.
-Approval support for other agents will be added with Codex support.
+Approval cards for other agents are on the list.
 
 The pill lifecycle:
 
@@ -82,7 +65,7 @@ The pill lifecycle:
 
 ## Real-world examples
 
-### Gemini CLI (macOS)
+### Gemini CLI
 
 Dewdrop supports Gemini CLI out of the box via **Settings → Gemini CLI → Install hooks**.
 The installer writes to `~/.gemini/settings.json` and uses `--agent gemini` so
@@ -98,7 +81,7 @@ Dewdrop events automatically.
 
 `AfterModel` is not installed — it fires on every response chunk and would flood the island.
 
-### Antigravity — `agy` (macOS)
+### Antigravity — `agy`
 
 Dewdrop supports Antigravity out of the box via **Settings → Antigravity → Install hooks**.
 The installer writes to `~/.gemini/config/hooks.json` (timeouts in seconds) and uses
@@ -115,11 +98,10 @@ island's `tool_name` / `session_id`.
 
 ### Any other tool
 
-Follow the generic pattern: call `nb-hook --agent <your-name> <EventName>` (macOS)
-or `coucou-hook.exe --agent <your-name> <EventName>` (Windows) and let the relay
+Follow the generic pattern: call `nb-hook --agent <your-name> <EventName>` and let the relay
 forward the event.
 
-## Quick test (macOS)
+## Quick test
 
 With Dewdrop running:
 

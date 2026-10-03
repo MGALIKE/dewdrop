@@ -96,7 +96,7 @@ A notch companion is on screen all day, so it has to be nearly free. Dewdrop is 
 | Pointer on the island, moving | **10–13 %** | everything alive at 30 fps |
 | Pointer parked on the island | **~3 %** after 5 s | the animations settle until it moves |
 
-How it gets there — the long version with the measurements is in [docs/ENERGY.md](docs/ENERGY.md):
+How it gets there — the long version with the measurements is in [docs/ENERGY.md](docs/ENERGY.md); how the island behaves is in [docs/DESIGN.md](docs/DESIGN.md):
 
 - **Only the visible view exists.** The island's sixteen views are not kept alive at opacity 0; the one you see is the only one in the tree.
 - **Nothing ticks for nothing.** Dew's canvas is event-driven: it draws while something changes and stops the moment it settles. A slow heartbeat asks whether a blink is due.

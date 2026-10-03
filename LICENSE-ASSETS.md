@@ -1,28 +1,15 @@
-# Coucou — name, character and artwork
+# Dewdrop — name, character and artwork
 
-Copyright (c) 2026 Louis Raillé. All rights reserved, except as stated below.
+## Dewdrop's own
 
-The [MIT License](LICENSE) covers the **source code** of Coucou. It does **not** cover the brand and the artwork listed here, which remain the property of Louis Raillé:
+The name **Dewdrop**, the **Dew** character (its shape, look, expressions and animations), the **app icon** and **menu bar glyph**, the **sounds** in `NotchBuddy/Resources/sounds/`, the generators in `design/` and the images and GIFs in `docs/media/` were made for this project. They are covered by the same [MIT License](LICENSE) as the code: use them, remix them, ship them in your own fork, keep the copyright notice. If you build something that is not Dewdrop, please don't call it Dewdrop.
 
-- the names **“Coucou”** and **“Mochi”**;
-- the **Mochi character** — its design, look, expressions and animations as a character;
-- the **app icon** and **menu bar icon** (`NotchBuddy/Assets.xcassets/`);
-- the **sounds** (`NotchBuddy/Resources/sounds/`);
-- the **images, GIFs and videos** in `docs/media/` and `design/`.
+## What comes from Coucou
 
-## What you can do
+Dewdrop is a fork of [Coucou](https://github.com/Louis-CFM/coucou) by Louis Raillé. Coucou's code is MIT and lives on in this repository with its copyright notice. Coucou's **name**, its **Mochi** character, its **icon**, its **sounds** and its **demo media** are reserved by their author and are **not** in this repository: they were replaced before Dewdrop went public, and must not be reintroduced. Talking about Coucou, linking to it or showing it is of course fine.
 
-- Build and run Coucou from this repository, for yourself, as it is.
-- Fork it and contribute back with pull requests.
-- Show, review, write or talk about Coucou (articles, videos, posts), including screenshots and the demo media.
+Two things were kept for compatibility, not as branding: the hook relay still accepts the payload fields `coucou_agent` and `coucou_origin` and installs into `~/.claude/coucou/`, so agents and hooks written for either app work with both; and the Keychain service name and support folder keep their original identifiers, so an upgrade from Coucou keeps its keys and hooks.
 
-## What you can't do without written permission
+## Questions
 
-- Publish or distribute an app, a fork or a derivative work under the name “Coucou” or “Mochi”, or with the Coucou icon, the Mochi character or the Coucou sounds — on the App Store, on GitHub releases, or anywhere else.
-- Use any of these assets commercially, or in a way that suggests your project is Coucou or is made or endorsed by its author.
-
-If you fork Coucou to ship your own app, that's welcome under the MIT License: just give it **your own name, icon, character and sounds**.
-
-## Questions or permission requests
-
-Open an issue on [GitHub](https://github.com/Louis-CFM/coucou/issues) or write to raillelouis@gmail.com.
+Open an issue on [GitHub](https://github.com/MGALIKE/dewdrop/issues).
